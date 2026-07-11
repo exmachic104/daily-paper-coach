@@ -8,7 +8,9 @@
 """
 from __future__ import annotations
 
+import re
 import time
+import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -18,6 +20,12 @@ from .config import config
 
 S2_SEARCH = "https://api.semanticscholar.org/graph/v1/paper/search"
 OPENALEX_SEARCH = "https://api.openalex.org/works"
+ARXIV_SEARCH = "http://export.arxiv.org/api/query"
+
+
+def _norm_title(t: str) -> str:
+    """重複排除用にタイトルを正規化する。"""
+    return re.sub(r"[^a-z0-9]", "", (t or "").lower())
 
 
 @dataclass
@@ -100,7 +108,9 @@ def _search_openalex(query: str, limit: int = 10) -> list[Candidate]:
     out: list[Candidate] = []
     for w in data.get("results", []):
         oa = w.get("open_access") or {}
-        pdf = oa.get("oa_url")
+        # best_oa_location.pdf_url があれば直リンクPDFを優先
+        best = w.get("best_oa_location") or {}
+        pdf = best.get("pdf_url") or oa.get("oa_url")
         if not pdf:
             continue
         # abstract は inverted index で提供されるため復元する
@@ -139,35 +149,87 @@ def _reconstruct_abstract(inverted: dict | None) -> str:
     return " ".join(w for _, w in positions)[:1200]
 
 
+# ---- arXiv ----------------------------------------------------------------
+
+def _search_arxiv(query: str, limit: int = 10) -> list[Candidate]:
+    params = {"search_query": f"all:{query}", "start": 0, "max_results": limit}
+    resp = requests.get(ARXIV_SEARCH, params=params, timeout=30)
+    resp.raise_for_status()
+    ns = {"a": "http://www.w3.org/2005/Atom"}
+    root = ET.fromstring(resp.text)
+    out: list[Candidate] = []
+    for entry in root.findall("a:entry", ns):
+        title = (entry.findtext("a:title", default="", namespaces=ns) or "").strip().replace("\n", " ")
+        summary = (entry.findtext("a:summary", default="", namespaces=ns) or "").strip()
+        published = entry.findtext("a:published", default="", namespaces=ns) or ""
+        year = int(published[:4]) if published[:4].isdigit() else None
+        authors = [
+            (a.findtext("a:name", default="", namespaces=ns) or "")
+            for a in entry.findall("a:author", ns)
+        ]
+        aid = (entry.findtext("a:id", default="", namespaces=ns) or "").rsplit("/", 1)[-1]
+        pdf, landing = "", ""
+        for link in entry.findall("a:link", ns):
+            if link.get("title") == "pdf":
+                pdf = link.get("href", "")
+            elif link.get("rel") == "alternate":
+                landing = link.get("href", "")
+        if not pdf and aid:
+            pdf = f"https://arxiv.org/pdf/{aid}"
+        if not pdf:
+            continue
+        out.append(
+            Candidate(
+                paper_id=f"arxiv:{aid}",
+                title=title,
+                abstract=summary[:1200],
+                year=year,
+                venue="arXiv",
+                authors=authors,
+                pdf_url=pdf,
+                landing_url=landing or pdf,
+                source="arxiv",
+            )
+        )
+    return out
+
+
 # ---- 統合検索 -------------------------------------------------------------
 
-def search(queries: list[str], exclude_ids: set[str], limit_per_query: int = 8) -> list[Candidate]:
-    """複数クエリで検索し、OA PDF のある候補を重複排除して返す。
+def search(queries: list[str], exclude_ids: set[str], limit_per_query: int = 10) -> list[Candidate]:
+    """複数クエリを3ソースで検索し、OA PDF のある候補を重複排除して返す。
 
-    Semantic Scholar を主に使い、429 で失敗する場合は OpenAlex にフォールバック。
+    Semantic Scholar / OpenAlex / arXiv を毎回併用してマージする。1ソースが
+    失敗・0件でも他ソースで補える。ID とタイトルの両方で重複を排除する。
     """
     candidates: list[Candidate] = []
-    seen: set[str] = set(exclude_ids)
+    seen_ids: set[str] = set(exclude_ids)
+    seen_titles: set[str] = set()
 
-    for q in queries:
-        results: list[Candidate] = []
-        try:
-            results = _search_semantic_scholar(q, limit_per_query)
-        except Exception as e:  # noqa: BLE001
-            print(f"[s2] Semantic Scholar 失敗 ('{q}'): {e} → OpenAlex にフォールバック")
-            try:
-                results = _search_openalex(q, limit_per_query)
-            except Exception as e2:  # noqa: BLE001
-                print(f"[s2] OpenAlex も失敗 ('{q}'): {e2}")
-                continue
-
+    def add(results: list[Candidate]) -> None:
         for c in results:
             key = c.paper_id or c.pdf_url
-            if not key or key in seen or not c.title:
+            nt = _norm_title(c.title)
+            if not c.title or not key or key in seen_ids or (nt and nt in seen_titles):
                 continue
-            seen.add(key)
+            seen_ids.add(key)
+            if nt:
+                seen_titles.add(nt)
             candidates.append(c)
 
+    sources = (
+        ("Semantic Scholar", _search_semantic_scholar),
+        ("OpenAlex", _search_openalex),
+        ("arXiv", _search_arxiv),
+    )
+    for q in queries:
+        for name, fn in sources:
+            try:
+                add(fn(q, limit_per_query))
+            except Exception as e:  # noqa: BLE001
+                print(f"[s2] {name} 失敗 ('{q}'): {e}")
+
+    print(f"[s2] 候補 {len(candidates)} 件を取得（クエリ {len(queries)} 個）")
     return candidates
 
 
