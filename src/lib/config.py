@@ -12,7 +12,7 @@ def _get(name: str, default: str | None = None, required: bool = False) -> str |
     val = os.environ.get(name, default)
     if required and not val:
         raise RuntimeError(
-            f"必須の環境変数 {name} が設定されていません。REQUIREMENTS.md の §10 を参照してください。"
+            f"必須の環境変数 {name} が設定されていません。要件定義書の §10 を参照してください。"
         )
     return val
 
