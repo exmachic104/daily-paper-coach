@@ -86,15 +86,25 @@ def _select_and_deliver(user_requests: list[str], today: str) -> dict:
     if not candidates:
         raise RuntimeError("オープンアクセスPDFのある候補が見つかりませんでした。")
 
-    # Claude が候補から1本選定
-    candidates_text = "\n\n".join(c.summary_for_prompt() for c in candidates[:15])
-    selection = claude.select_paper(candidates_text, guidance, roadmap, user_requests)
-    chosen_id = str(selection.get("paper_id", "")).strip()
+    # Claude が候補から1本選定（番号指定でIDの取り違えを防ぐ）
+    shortlist = candidates[:15]
+    numbered_text = "\n\n".join(
+        f"{i}. {c.summary_for_prompt()}" for i, c in enumerate(shortlist, start=1)
+    )
+    selection = claude.select_paper(numbered_text, guidance, roadmap, user_requests)
 
-    # 選定IDに対応する候補を探す（見つからなければ先頭）
-    by_id = {c.paper_id: c for c in candidates}
-    ordered = [by_id[chosen_id]] if chosen_id in by_id else []
-    ordered += [c for c in candidates if c not in ordered]
+    # 1始まりの index を検証。範囲外なら分野不一致の可能性が高いのでエラーにする
+    try:
+        idx = int(selection.get("index"))
+    except (TypeError, ValueError):
+        idx = 0
+    if not (1 <= idx <= len(shortlist)):
+        raise RuntimeError(
+            f"選定 index が不正でした (index={selection.get('index')}, 候補数={len(shortlist)})。"
+        )
+    chosen_first = shortlist[idx - 1]
+    # 選定した候補を先頭に、以降はPDF取得失敗時のフォールバック用
+    ordered = [chosen_first] + [c for c in candidates if c is not chosen_first]
 
     # PDF 取得（最大3候補までフォールバック）
     chosen: s2.Candidate | None = None

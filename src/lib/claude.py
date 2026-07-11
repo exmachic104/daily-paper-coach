@@ -124,12 +124,17 @@ def plan_search(
         "recent_log": recent_log,
         "user_requests": user_requests,
     }
+    topic = roadmap.get("topic", "")
     lead = (
         "以下の JSON はロードマップ・直近の学習ログ・ユーザーからの要望です。\n"
         f"{json.dumps(payload, ensure_ascii=False, indent=2)}\n\n"
+        f"【最重要】対象分野は「{topic}」です。検索クエリは必ずこの分野に限定してください。"
+        "各クエリに分野を特定する英語の専門用語（例: PMSM, sensorless control, "
+        "permanent magnet synchronous motor, position estimation 等）を必ず含め、"
+        "無関係な分野（通信・ネットワーク等）の論文がヒットしないようにしてください。\n\n"
         "次に読むべき論文を検索するための方針を、次の JSON 形式で返してください:\n"
         "{\n"
-        '  "search_queries": ["英語の検索クエリを2〜4個。オープンアクセスPDFが見つかりやすい具体語を含める"],\n'
+        '  "search_queries": ["英語の検索クエリを2〜4個。上記の分野語を必ず含める"],\n'
         '  "guidance": "選定時に重視する観点（難易度・テーマ・分量）を日本語で簡潔に"\n'
         "}\n"
         "正答率が高く安定していればフェーズを進め、『前提知識の不足』が続くなら基礎寄り、"
@@ -141,31 +146,38 @@ def plan_search(
 # ---- 2. 候補からの選定 ----------------------------------------------------
 
 def select_paper(
-    candidates_text: str,
+    numbered_candidates: str,
     guidance: str,
     roadmap: dict,
     user_requests: list[str],
 ) -> dict:
-    """候補一覧から1本を選び、フェーズ・読む範囲・位置づけを決める。"""
+    """番号付き候補一覧から1本を選び、フェーズ・読む範囲・位置づけを決める。"""
+    topic = roadmap.get("topic", "")
     system = (
-        "あなたはPMSMセンサレス制御の学習コーチです。候補論文から今日読む1本を選定します。"
+        f"あなたは「{topic}」の学習コーチです。候補論文から今日読む1本を選定します。"
+        f"【最重要】必ず「{topic}」に合致する論文を選んでください。分野違いの論文"
+        "（通信・ネットワーク等、対象分野と無関係なもの）は絶対に選ばないこと。"
         "15分（約15分の精読）で読める分量になるよう、長い論文は読むセクションを指定します。"
         "必ず有効な JSON のみを返してください。"
     )
     lead = (
-        "候補論文一覧:\n"
-        f"{candidates_text}\n\n"
+        "候補論文一覧（各行の先頭の番号で参照します）:\n"
+        f"{numbered_candidates}\n\n"
+        f"対象分野: {topic}\n"
         f"選定方針: {guidance}\n"
         f"ロードマップ現在位置: {json.dumps(roadmap.get('current_position', {}), ensure_ascii=False)}\n"
         f"ユーザー要望: {json.dumps(user_requests, ensure_ascii=False)}\n\n"
         "次の JSON 形式で1本を選定してください:\n"
         "{\n"
-        '  "paper_id": "選んだ候補の [ ] 内のID",\n'
+        '  "index": 選んだ候補の先頭の番号(整数, 1始まり),\n'
         '  "phase": フェーズ番号(整数),\n'
         '  "assigned_sections": "読むべきセクション（例: Sec.1-3、全体でも可）",\n'
         '  "roadmap_position": "ロードマップ上の位置づけ（例: フェーズ2: モデルベース手法 3/5本目）",\n'
         '  "reason": "選定理由を日本語で簡潔に"\n'
-        "}"
+        "}\n"
+        f"注意: assigned_sections と roadmap_position は、選んだ番号の論文そのものに"
+        "対応させること。対象分野に合致する候補が一つも無い場合のみ、最も近いものを選び"
+        "reason にその旨を明記してください。"
     )
     return _message(system, lead, max_tokens=1200)
 
