@@ -1,0 +1,250 @@
+"""Anthropic API (Claude) 連携。
+
+論文選定・要約・出題・採点・誤答原因推定を担う。PDF は document ブロック
+（base64）で渡し、サイズ超過時はテキスト抽出にフォールバックする。
+出題・採点・フィードバックはすべて日本語。
+"""
+from __future__ import annotations
+
+import base64
+import json
+import re
+from typing import Any
+
+import anthropic
+
+from .config import config
+
+_client: anthropic.Anthropic | None = None
+
+
+def _get_client() -> anthropic.Anthropic:
+    global _client
+    if _client is None:
+        config.require("ANTHROPIC_API_KEY")
+        _client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
+    return _client
+
+
+def _extract_json(text: str) -> Any:
+    """Claude の応答から JSON を頑健に取り出す。"""
+    text = text.strip()
+    # ```json ... ``` コードフェンスを除去
+    fence = re.search(r"```(?:json)?\s*(.+?)```", text, re.DOTALL)
+    if fence:
+        text = fence.group(1).strip()
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        # 最初の { から最後の } までを抽出して再試行
+        start, end = text.find("{"), text.rfind("}")
+        if start != -1 and end != -1 and end > start:
+            return json.loads(text[start : end + 1])
+        raise
+
+
+def _message(
+    system: str,
+    user_content: Any,
+    max_tokens: int = 4000,
+    expect_json: bool = True,
+) -> Any:
+    """Messages API を呼び出し、テキスト（or JSON）を返す。"""
+    client = _get_client()
+    resp = client.messages.create(
+        model=config.ANTHROPIC_MODEL,
+        max_tokens=max_tokens,
+        system=system,
+        output_config={"effort": "medium"},
+        messages=[{"role": "user", "content": user_content}],
+    )
+    text = "".join(b.text for b in resp.content if b.type == "text")
+    if expect_json:
+        return _extract_json(text)
+    return text
+
+
+# ---- PDF/テキストのコンテンツブロック化 -----------------------------------
+
+def _pdf_block(pdf_bytes: bytes) -> dict:
+    b64 = base64.standard_b64encode(pdf_bytes).decode("utf-8")
+    return {
+        "type": "document",
+        "source": {
+            "type": "base64",
+            "media_type": "application/pdf",
+            "data": b64,
+        },
+    }
+
+
+def _extract_pdf_text(pdf_bytes: bytes) -> str | None:
+    """pypdf があればテキスト抽出する（サイズ超過時のフォールバック）。"""
+    try:
+        import io
+
+        from pypdf import PdfReader
+
+        reader = PdfReader(io.BytesIO(pdf_bytes))
+        pages = [p.extract_text() or "" for p in reader.pages]
+        return "\n\n".join(pages)[:120_000]
+    except Exception as e:  # noqa: BLE001
+        print(f"[claude] PDF テキスト抽出失敗: {e}")
+        return None
+
+
+def build_paper_content(
+    lead_text: str,
+    pdf_bytes: bytes | None,
+    pdf_text: str | None = None,
+) -> list[dict]:
+    """PDF（またはテキスト）+ 指示テキストのコンテンツブロックを構築する。"""
+    blocks: list[dict] = []
+    if pdf_bytes is not None:
+        blocks.append(_pdf_block(pdf_bytes))
+    elif pdf_text:
+        blocks.append({"type": "text", "text": f"論文本文（抽出テキスト）:\n{pdf_text}"})
+    blocks.append({"type": "text", "text": lead_text})
+    return blocks
+
+
+# ---- 1. 検索方針の生成 ----------------------------------------------------
+
+def plan_search(
+    roadmap: dict, recent_log: list[dict], user_requests: list[str]
+) -> dict:
+    """学習ログとロードマップから次に読むべき論文の検索クエリ方針を生成する。"""
+    system = (
+        "あなたはPMSMセンサレス制御を研究者レベルまで積み上げる学習コーチです。"
+        "学習ログとロードマップに基づき、次に読むべき論文を探すための英語の検索クエリを設計します。"
+        "必ず有効な JSON のみを返してください。"
+    )
+    payload = {
+        "roadmap": roadmap,
+        "recent_log": recent_log,
+        "user_requests": user_requests,
+    }
+    lead = (
+        "以下の JSON はロードマップ・直近の学習ログ・ユーザーからの要望です。\n"
+        f"{json.dumps(payload, ensure_ascii=False, indent=2)}\n\n"
+        "次に読むべき論文を検索するための方針を、次の JSON 形式で返してください:\n"
+        "{\n"
+        '  "search_queries": ["英語の検索クエリを2〜4個。オープンアクセスPDFが見つかりやすい具体語を含める"],\n'
+        '  "guidance": "選定時に重視する観点（難易度・テーマ・分量）を日本語で簡潔に"\n'
+        "}\n"
+        "正答率が高く安定していればフェーズを進め、『前提知識の不足』が続くなら基礎寄り、"
+        "『時間不足』が続くなら分量の少ない論文を狙ってください。"
+    )
+    return _message(system, lead, max_tokens=1200)
+
+
+# ---- 2. 候補からの選定 ----------------------------------------------------
+
+def select_paper(
+    candidates_text: str,
+    guidance: str,
+    roadmap: dict,
+    user_requests: list[str],
+) -> dict:
+    """候補一覧から1本を選び、フェーズ・読む範囲・位置づけを決める。"""
+    system = (
+        "あなたはPMSMセンサレス制御の学習コーチです。候補論文から今日読む1本を選定します。"
+        "15分（約15分の精読）で読める分量になるよう、長い論文は読むセクションを指定します。"
+        "必ず有効な JSON のみを返してください。"
+    )
+    lead = (
+        "候補論文一覧:\n"
+        f"{candidates_text}\n\n"
+        f"選定方針: {guidance}\n"
+        f"ロードマップ現在位置: {json.dumps(roadmap.get('current_position', {}), ensure_ascii=False)}\n"
+        f"ユーザー要望: {json.dumps(user_requests, ensure_ascii=False)}\n\n"
+        "次の JSON 形式で1本を選定してください:\n"
+        "{\n"
+        '  "paper_id": "選んだ候補の [ ] 内のID",\n'
+        '  "phase": フェーズ番号(整数),\n'
+        '  "assigned_sections": "読むべきセクション（例: Sec.1-3、全体でも可）",\n'
+        '  "roadmap_position": "ロードマップ上の位置づけ（例: フェーズ2: モデルベース手法 3/5本目）",\n'
+        '  "reason": "選定理由を日本語で簡潔に"\n'
+        "}"
+    )
+    return _message(system, lead, max_tokens=1200)
+
+
+# ---- 3. 配信メッセージ + 出題の生成 ---------------------------------------
+
+def generate_delivery_and_quiz(
+    pdf_bytes: bytes | None,
+    pdf_text: str | None,
+    paper_meta: dict,
+    roadmap_position: str,
+    assigned_sections: str,
+) -> dict:
+    """PDF を読み、配信内容と夜の出題3問・模範解答・採点用要点を生成する。"""
+    system = (
+        "あなたはPMSMセンサレス制御の学習コーチです。与えられた論文を読み、"
+        "15分で読むための日本語ガイドと、理解度確認クイズ3問を作成します。"
+        "出題方針は固定です:\n"
+        "- Q1（論点把握）: この論文が解決しようとした課題は何か\n"
+        "- Q2（手法理解）: 提案手法の核となるアイデア・原理は何か\n"
+        "- Q3（進歩性）: 従来手法と比べて何がどう改善されたか／どんな限界が残るか\n"
+        "各問は短い文章(1〜3文)で答えられる形式にし、要約だけでは答えられず"
+        "指定セクションを読めば答えられる粒度にします。すべて日本語。"
+        "必ず有効な JSON のみを返してください。"
+    )
+    lead = (
+        f"論文メタ情報: {json.dumps(paper_meta, ensure_ascii=False)}\n"
+        f"読むべきセクション: {assigned_sections}\n"
+        f"ロードマップ上の位置づけ: {roadmap_position}\n\n"
+        "上記の論文について、次の JSON 形式で返してください:\n"
+        "{\n"
+        '  "summary": "3〜4文の日本語要約（何が課題で、何を提案し、何が新しいか）",\n'
+        '  "reading_guide": "今日の読みどころ。読むべきセクション・飛ばしてよい箇所・注目すべき図表を日本語で",\n'
+        '  "questions": ["Q1", "Q2", "Q3"],\n'
+        '  "model_answers": ["Q1の模範解答", "Q2の模範解答", "Q3の模範解答"],\n'
+        '  "key_points": "採点時に参照する、指定セクションの内容の要点（日本語、箇条書き可）"\n'
+        "}"
+    )
+    content = build_paper_content(lead, pdf_bytes, pdf_text)
+    return _message(system, content, max_tokens=5000)
+
+
+# ---- 4. 採点と誤答原因の推定 ----------------------------------------------
+
+def grade(quiz: dict, user_answers_raw: str, recent_log: list[dict]) -> dict:
+    """回答を採点し、誤答の原因を推定してフィードバックを生成する。"""
+    system = (
+        "あなたはPMSMセンサレス制御の学習コーチです。ユーザーの回答を採点し、"
+        "誤答があればその原因を推定します。原因分類は次の4つのいずれか:\n"
+        "- 時間不足: 該当箇所まで読めていない\n"
+        "- 概念の誤解: 読んだが原理を取り違えている\n"
+        "- 前提知識の不足: 論文以前の基礎概念でつまずいている\n"
+        "- 問題の読み違え: 理解はしているが問いとずれた回答をしている\n"
+        "すべて日本語。必ず有効な JSON のみを返してください。"
+    )
+    context = {
+        "summary": quiz.get("summary"),
+        "key_points": quiz.get("key_points"),
+        "questions": quiz.get("questions"),
+        "model_answers": quiz.get("model_answers"),
+        "assigned_sections": quiz.get("assigned_sections"),
+    }
+    lead = (
+        "論文の要約・要点・出題・模範解答:\n"
+        f"{json.dumps(context, ensure_ascii=False, indent=2)}\n\n"
+        "直近2週間の学習ログ（誤答傾向の文脈）:\n"
+        f"{json.dumps(recent_log, ensure_ascii=False, indent=2)}\n\n"
+        "ユーザーの回答（生テキスト。冒頭に読了状況 [読了]/[途中]/[未読] が付く想定）:\n"
+        f"{user_answers_raw}\n\n"
+        "次の JSON 形式で採点結果を返してください:\n"
+        "{\n"
+        '  "reported_status": "読了 | 途中 | 未読（回答から推定）",\n'
+        '  "results": [\n'
+        '    {"q": 1, "verdict": "correct|partial|incorrect", "cause": "誤答時のみ原因分類、正解ならnull", '
+        '"note": "簡潔な解説", "explanation": "誤答時の補足（基礎トピックの提示など）"}\n'
+        "  ],\n"
+        '  "advice": "採点結果を踏まえた次回への一言アドバイス（日本語）",\n'
+        '  "adjustment": "翌日以降の選定への反映提案（例: 同テーマの易しめ、基礎解説を追加、読む範囲を狭める）"\n'
+        "}\n"
+        "results は3問分、q は 1,2,3 の順で必ず含めてください。"
+    )
+    return _message(system, lead, max_tokens=3000)

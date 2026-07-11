@@ -1,0 +1,45 @@
+{
+  "topic": "PMSMセンサレス制御",
+  "current_position": {
+    "phase": 1,
+    "note": "フェーズ1: 全体像。サーベイ論文から開始する。"
+  },
+  "phases": [
+    {
+      "phase": 1,
+      "title": "全体像",
+      "target_papers": "1〜2本",
+      "description": "サーベイ論文から開始し、分野の全体像を掴む。長いサーベイは2日に分割し、日ごとに読むセクションを指定する。",
+      "seed_candidates": [
+        {
+          "title": "A Review of Position Sensorless Compound Control for PMSM Drives",
+          "venue": "World Electric Vehicle Journal (MDPI)",
+          "year": 2023,
+          "note": "オープンアクセス。初日候補。長いので2日に分割する。",
+          "selected": false
+        }
+      ]
+    },
+    {
+      "phase": 2,
+      "title": "中高速域のモデルベース手法",
+      "target_papers": "4〜5本",
+      "description": "拡張誘起電圧（EEMF）、磁束オブザーバ、スライディングモードオブザーバ（SMO）の代表論文・改良論文。",
+      "seed_candidates": []
+    },
+    {
+      "phase": 3,
+      "title": "低速・零速域",
+      "target_papers": "3〜4本",
+      "description": "高周波重畳法（HFI）、I/F始動、突極性利用の原理。",
+      "seed_candidates": []
+    },
+    {
+      "phase": 4,
+      "title": "全速度域複合制御と最新動向",
+      "target_papers": "3〜4本",
+      "description": "速度域間の切替手法、適応オブザーバ、AI応用（2023年以降）。",
+      "seed_candidates": []
+    }
+  ]
+}

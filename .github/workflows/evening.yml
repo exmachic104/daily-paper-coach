@@ -1,0 +1,42 @@
+name: evening
+
+on:
+  schedule:
+    # JST 21:00 = UTC 12:00。Actions の cron は最大15〜30分遅延しうる。
+    - cron: '0 12 * * *'
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+concurrency:
+  group: daily-paper-coach
+  cancel-in-progress: false
+
+jobs:
+  evening:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run evening job
+        working-directory: src
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ANTHROPIC_MODEL: ${{ vars.ANTHROPIC_MODEL }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
+          DISCORD_CHANNEL_ID: ${{ secrets.DISCORD_CHANNEL_ID }}
+          BEEMINDER_USERNAME: ${{ secrets.BEEMINDER_USERNAME }}
+          BEEMINDER_AUTH_TOKEN: ${{ secrets.BEEMINDER_AUTH_TOKEN }}
+          BEEMINDER_GOAL: ${{ secrets.BEEMINDER_GOAL }}
+          USER_EMAIL: ${{ secrets.USER_EMAIL }}
+          DRY_RUN_PENALTY: ${{ vars.DRY_RUN_PENALTY }}
+        run: python evening.py
