@@ -1,1 +1,40 @@
-[]
+[
+  {
+    "date": "2026-07-11",
+    "paper": {
+      "title": "Observers for High-Speed Sensorless PMSM Drives: Design Methods, Tuning Challenges and Future Trends",
+      "s2_paper_id": "W3153062593",
+      "url": "https://openalex.org/W3153062593",
+      "pdf_url": "https://ieeexplore.ieee.org/ielx7/6287639/9312710/09400421.pdf",
+      "phase": 1,
+      "assigned_sections": "Abstract, Introduction, および高速域推定手法の分類概観（前半の手法分類セクション）。15分では全体像と分類体系に集中。"
+    },
+    "answered": true,
+    "self_reported_status": "読了",
+    "results": [
+      {
+        "q": 1,
+        "verdict": "partial",
+        "cause": "問題の読み違え",
+        "note": "「早く推定できないと閉ループ制御が不安定化する」という要点は捉えているが、日本語が崩れており（『大きな影響がないためには』）論旨が逆転して読める。安定性だけでなく動的推定性能が必要という結論への明示が不足。",
+        "explanation": "模範解答のように『推定が遅いと速度閉ループが不安定化し界磁配向が失われる→ゆえに安定性に加え速い動的推定性能が要求される』という因果を明確に述べると完全解答になります。"
+      },
+      {
+        "q": 2,
+        "verdict": "correct",
+        "cause": null,
+        "note": "外乱オブザーバはEEMFを外乱、FOOは状態として扱うという核心を正確に指摘できている。",
+        "explanation": ""
+      },
+      {
+        "q": 3,
+        "verdict": "correct",
+        "cause": null,
+        "note": "開ループに対するロバスト性、LDOの周波数特性・SMOのチャタリングへの優位、そして速度推定誤差により極がずれ実速度依存で不安定化する限界まで押さえられている。",
+        "explanation": ""
+      }
+    ],
+    "penalty": false,
+    "adjustment": "理解度は高いので難易度は維持。次回は後半のSMO/STO/EKFの利得設計や安定性条件（KYL等）に踏み込んだ設問を追加し、応用理解を確認するとよい。"
+  }
+]
