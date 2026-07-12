@@ -137,12 +137,14 @@ def _select_and_deliver(user_requests: list[str], today: str) -> dict:
         "pdf_url": chosen.pdf_url,
     }
     roadmap_position = selection.get("roadmap_position", "")
-    assigned_sections = selection.get("assigned_sections", "全体")
+    assigned_sections_hint = selection.get("assigned_sections", "全体")
 
-    # 配信内容 + 出題を生成
+    # 配信内容 + 出題を生成（読む範囲は本文に基づいて生成側が確定する）
     gen = claude.generate_delivery_and_quiz(
-        pdf_bytes, pdf_text, paper_meta, roadmap_position, assigned_sections
+        pdf_bytes, pdf_text, paper_meta, roadmap_position, assigned_sections_hint
     )
+    # 生成側が本文から確定した読む範囲を採用（推測を上書き）
+    assigned_sections = gen.get("assigned_sections") or assigned_sections_hint
 
     # 配信メッセージを投稿（Embed）
     authors = ", ".join(chosen.authors[:4]) + (" et al." if len(chosen.authors) > 4 else "")

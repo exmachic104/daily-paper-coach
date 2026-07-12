@@ -189,9 +189,13 @@ def generate_delivery_and_quiz(
     pdf_text: str | None,
     paper_meta: dict,
     roadmap_position: str,
-    assigned_sections: str,
+    assigned_sections_hint: str,
 ) -> dict:
-    """PDF を読み、配信内容と夜の出題3問・模範解答・採点用要点を生成する。"""
+    """PDF を読み、配信内容・読む範囲・夜の出題3問・模範解答・採点用要点を生成する。
+
+    読む範囲(assigned_sections)は、この生成ステップが実際の論文本文に基づいて
+    確定する（選定ステップの推測はあくまで参考）。読みどころと必ず整合させる。
+    """
     system = (
         "あなたはPMSMセンサレス制御の学習コーチです。与えられた論文を読み、"
         "15分で読むための日本語ガイドと、理解度確認クイズ3問を作成します。"
@@ -205,15 +209,16 @@ def generate_delivery_and_quiz(
     )
     lead = (
         f"論文メタ情報: {json.dumps(paper_meta, ensure_ascii=False)}\n"
-        f"読むべきセクション: {assigned_sections}\n"
+        f"読むべきセクションの候補（参考。実際の論文の章立てと違えば無視してよい）: {assigned_sections_hint}\n"
         f"ロードマップ上の位置づけ: {roadmap_position}\n\n"
         "上記の論文について、次の JSON 形式で返してください:\n"
         "{\n"
+        '  "assigned_sections": "この論文で実際に読むべきセクションを、論文中に存在する章・節・図表名で簡潔に指定（例: Sec.1, 2.3-2.4, Fig.4-5）。存在しない章名を書かないこと。reading_guide と必ず一致させる",\n'
         '  "summary": "3〜4文の日本語要約（何が課題で、何を提案し、何が新しいか）",\n'
-        '  "reading_guide": "今日の読みどころ。読むべきセクション・飛ばしてよい箇所・注目すべき図表を日本語で",\n'
+        '  "reading_guide": "今日の読みどころ。読むべきセクション・飛ばしてよい箇所・注目すべき図表を日本語で。assigned_sections と整合させる",\n'
         '  "questions": ["Q1", "Q2", "Q3"],\n'
         '  "model_answers": ["Q1の模範解答", "Q2の模範解答", "Q3の模範解答"],\n'
-        '  "key_points": "採点時に参照する、指定セクションの内容の要点（日本語、箇条書き可）"\n'
+        '  "key_points": "採点時に参照する、assigned_sections の内容の要点（日本語、箇条書き可）"\n'
         "}"
     )
     content = build_paper_content(lead, pdf_bytes, pdf_text)
