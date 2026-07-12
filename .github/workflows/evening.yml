@@ -3,8 +3,8 @@ name: evening
 
 on:
   schedule:
-    # JST 21:00 = UTC 12:00。Actions の cron は最大15〜30分遅延しうる。
-    - cron: '0 12 * * *'
+    # JST 19:00 = UTC 10:00。Actions の cron は数十分遅延しうる。
+    - cron: '0 10 * * *'
   workflow_dispatch: {}
 
 permissions:
