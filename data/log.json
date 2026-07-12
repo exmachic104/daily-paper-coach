@@ -36,5 +36,43 @@
     ],
     "penalty": false,
     "adjustment": "理解度は高いので難易度は維持。次回は後半のSMO/STO/EKFの利得設計や安定性条件（KYL等）に踏み込んだ設問を追加し、応用理解を確認するとよい。"
+  },
+  {
+    "date": "2026-07-12",
+    "paper": {
+      "title": "Hybrid sensorless control of PMSM in full speed range using HFI and back-EMF",
+      "s2_paper_id": "a1fb715a97d860667fa7aae86e38dc933cd5eedc",
+      "url": "https://www.semanticscholar.org/paper/a1fb715a97d860667fa7aae86e38dc933cd5eedc",
+      "pdf_url": "https://hrcak.srce.hr/file/435251",
+      "phase": 2,
+      "assigned_sections": "SMO with feedback of equivalent control の章（スライディングモードオブザーバの原理・設計部分）を中心に、序論と該当手法のセクション"
+    },
+    "answered": true,
+    "self_reported_status": "読了（回答から推定、冒頭マーカーなし）",
+    "results": [
+      {
+        "q": 1,
+        "verdict": "correct",
+        "cause": null,
+        "note": "逆起電力が速度比例で低速域では振幅がほぼゼロになりノイズと区別できず不安定化する、という核心を的確に捉えている。",
+        "explanation": ""
+      },
+      {
+        "q": 2,
+        "verdict": "correct",
+        "cause": null,
+        "note": "±10%Ωnを境界にHFIとback-EMFを切り替えるという判定基準・速度域の対応を正確に述べられている。極低速域でHFIがロータ位置推定を担う点まで補足できると完璧。",
+        "explanation": ""
+      },
+      {
+        "q": 3,
+        "verdict": "partial",
+        "cause": "時間不足",
+        "note": "オーバーシュート抑制・過渡応答改善・全速度域有効性・パラメータ変動耐性という改善点と検証方法は押さえられている。ただし『残る限界も含めて』という問いの指定に対し、シミュレーションのみで実機検証がない点・遷移点での誤差スパイクという限界への言及が欠落している。",
+        "explanation": "設問は限界の記述を明示的に求めています。模範解答のように『実機実験はなくシミュレーションのみ』『切替遷移点で速度・位置推定誤差にスパイクが残る』という2点を加えると完全解答になります。結果図の後半（図8〜9の遷移部）まで読み切れていない可能性があります。"
+      }
+    ],
+    "penalty": false,
+    "adjustment": "難易度は維持。次回は『限界・課題』を独立させて問う設問や、切替遷移時の誤差挙動・HFIの原理（突極性を利用したθr=(1/2)arctan(iβ/iα)推定）に踏み込んだ設問を加え、後半セクションの読み込みを促すとよい。"
   }
 ]
