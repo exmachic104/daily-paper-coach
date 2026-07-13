@@ -167,7 +167,7 @@ def _select_and_deliver(user_requests: list[str], today: str) -> dict:
     }
     discord.post_embed(embed, extra_content=f"🌅 **今日の論文** ({today})")
 
-    # 夜の出題ストックを構築（この時点では投稿しない）
+    # 出題ストックを構築
     pending = {
         "date": today,
         "paper": {
@@ -188,11 +188,44 @@ def _select_and_deliver(user_requests: list[str], today: str) -> dict:
         "posted": False,
         "quiz_message_id": None,
     }
+    # 同じ朝にクイズも投稿する（夜ジョブは廃止）
+    pending["quiz_message_id"] = _post_quiz(pending)
+    pending["posted"] = True
     return pending
+
+
+def _post_quiz(pending: dict) -> str | None:
+    """理解度確認クイズを Discord に投稿し、投稿メッセージ ID を返す。"""
+    questions = pending.get("questions", [])
+    title = pending.get("paper", {}).get("title", "本日の論文")
+    lines = [f"📝 **理解度確認クイズ** — {title}", ""]
+    for i, q in enumerate(questions, start=1):
+        lines.append(f"**Q{i}.** {q}")
+        lines.append("")
+    lines.append("――――――――――――――")
+    lines.append("回答方法:")
+    lines.append("`A1: ... / A2: ... / A3: ...` の形式で、このチャンネルに返信してください。")
+    lines.append("冒頭に読了状況を1つ添えてください: `[読了]` `[途中]` `[未読]`")
+    lines.append("期限: 明朝7:00の採点まで（今日中に論文を読んで回答してください）")
+    text = "\n".join(lines)
+    return discord.post_embed(
+        {
+            "title": f"理解度確認クイズ — {title[:200]}",
+            "description": text[:4000],
+            "color": 0xF28E2B,
+        }
+    )
 
 
 def run_morning() -> None:
     today = _today()
+
+    # 冪等ガード: 本日分を既に完了していれば二重実行をスキップ
+    # （朝ジョブを複数 cron 枠で走らせても安全にするため）
+    if store.get_last_morning_date() == today:
+        print(f"[morning] 本日({today})分は処理済みのためスキップします。")
+        return
+
     pending = store.load_pending_quiz()
 
     after_id = pending.get("quiz_message_id") if pending else None
@@ -211,12 +244,13 @@ def run_morning() -> None:
                 "self_reported_status": None, "results": [], "penalty": False,
                 "skipped": True,
             })
+            store.set_last_morning_date(today)
             store.git_commit_and_push(f"log: skip {today}")
-            return  # pending_quiz は残し、夜に同じ論文を再出題
+            return  # pending_quiz は残し、翌日に同じ論文を再出題
 
         if not pending.get("posted"):
-            # 夜ジョブが出題に失敗していた → ペナルティ対象外
-            discord.post_text("ℹ️ 前夜の出題が行われていなかったため、採点・ペナルティはありません。")
+            # 前回の出題投稿に失敗していた → ペナルティ対象外
+            discord.post_text("ℹ️ 前回の出題が投稿されていなかったため、採点・ペナルティはありません。")
         elif user_answers_raw.strip():
             # 回答あり → 採点 & Beeminder 達成
             result = _grade_and_post(pending, user_answers_raw)
@@ -243,10 +277,11 @@ def run_morning() -> None:
             })
         store.clear_pending_quiz()
 
-    # --- 次の論文の選定・配信・出題事前生成 ---
+    # --- 次の論文の選定・配信・出題（同じ朝にクイズも投稿）---
     new_pending = _select_and_deliver(user_requests, today)
     store.save_pending_quiz(new_pending)
-    store.git_commit_and_push(f"morning {today}: log update & next paper")
+    store.set_last_morning_date(today)
+    store.git_commit_and_push(f"morning {today}: log update, paper & quiz")
 
 
 def main() -> None:

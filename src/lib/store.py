@@ -17,6 +17,7 @@ DATA_DIR = os.path.join(_REPO_ROOT, "data")
 LOG_PATH = os.path.join(DATA_DIR, "log.json")
 ROADMAP_PATH = os.path.join(DATA_DIR, "roadmap.json")
 PENDING_QUIZ_PATH = os.path.join(DATA_DIR, "pending_quiz.json")
+STATE_PATH = os.path.join(DATA_DIR, "state.json")
 
 
 def _read_json(path: str, default: Any) -> Any:
@@ -89,6 +90,19 @@ def save_pending_quiz(quiz: dict) -> None:
 def clear_pending_quiz() -> None:
     if os.path.exists(PENDING_QUIZ_PATH):
         os.remove(PENDING_QUIZ_PATH)
+
+
+# ---- 実行状態（冪等化用） --------------------------------------------------
+
+def get_last_morning_date() -> str | None:
+    """最後に朝ジョブを完了した日付（JST）。同日二重実行のスキップに使う。"""
+    return _read_json(STATE_PATH, {}).get("last_morning_date")
+
+
+def set_last_morning_date(date: str) -> None:
+    state = _read_json(STATE_PATH, {})
+    state["last_morning_date"] = date
+    _write_json(STATE_PATH, state)
 
 
 # ---- git --------------------------------------------------------------

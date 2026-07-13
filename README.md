@@ -1,16 +1,16 @@
 # daily-paper-coach
 
-毎日1本・約15分で読める論文を配信し、夜に理解度確認クイズを出題、翌朝に自動採点する学習自動化システム。PMSMセンサレス制御を研究者レベルまで段階的に積み上げることを目的とする。
+毎日1本・約15分で読める論文を配信し、同時に理解度確認クイズを出題、翌朝に自動採点する学習自動化システム。PMSMセンサレス制御を研究者レベルまで段階的に積み上げることを目的とする。
 
 詳細な要件は [論文学習システム要件定義書.md](./論文学習システム要件定義書.md) を参照。
+
+> 注: 要件定義書は「朝に配信・夜に出題」の二段構えだが、GitHub Actions のスケジュール実行がベストエフォート（遅延・スキップあり）で、1日2回の成功に依存すると信頼性が下がるため、**朝ジョブ1本に統合**し論文とクイズを同時配信する構成に変更している。
 
 ## 構成
 
 ```
-.github/workflows/morning.yml   # JST 7:00  (cron: '0 22 * * *')
-.github/workflows/evening.yml   # JST 21:00 (cron: '0 12 * * *')
-src/morning.py                  # 朝ジョブ: 採点・ペナルティ・論文選定・配信・出題事前生成
-src/evening.py                  # 夜ジョブ: 出題の投稿
+.github/workflows/morning.yml   # 朝ジョブ (JST 7:00 / 7:40 の2枠)
+src/morning.py                  # 採点・ペナルティ・論文選定・配信・クイズ出題
 src/lib/
   config.py                     # 環境変数ベースの設定
   discord.py                    # 投稿(Webhook) / 履歴取得(Bot API)
@@ -21,13 +21,17 @@ src/lib/
 data/
   roadmap.json                  # フェーズ定義・現在位置・候補
   log.json                      # 学習ログ
-  pending_quiz.json             # 出題ストック(朝に生成→夜に投稿→翌朝採点後に削除)
+  pending_quiz.json             # 出題ストック(朝に生成・投稿→翌朝採点後に削除)
+  state.json                    # 実行状態(最後に完了した朝の日付。二重実行の冪等化用)
 ```
 
 ## 日次フロー
 
-- **朝 (JST 7:00)**: 前夜の出題への回答を採点 → Beeminder 判定 → 学習ログ更新 → 次の論文を選定・配信 → 夜の出題を事前生成
-- **夜 (JST 21:00)**: 事前生成した3問を Discord に投稿
+- **朝 (JST 7:00)**: 前日の出題への回答を採点 → Beeminder 判定 → 学習ログ更新 → 次の論文を選定・配信 →（同時に）理解度確認クイズ3問を出題
+- ユーザーはその日のうちに論文（指定セクション）を読み、Discord に回答
+- 翌朝の採点まで（期限 JST 7:00）
+
+信頼性対策: 朝ジョブは JST 7:00 と 7:40 の2枠で走らせ、片方がスキップされても救済する。`data/state.json` に完了日を記録し、同日の二重実行は冪等にスキップされる。
 
 ## セットアップ
 
@@ -54,11 +58,11 @@ Settings → Actions → General → Workflow permissions を **Read and write p
 ## 通しテスト手順
 
 1. `DRY_RUN_PENALTY=1` を設定
-2. `morning` workflow を手動実行 → 配信を確認
-3. `evening` workflow を手動実行 → 出題を確認
-4. Discord で `A1: ... / A2: ... / A3: ...`（冒頭に `[読了]` 等）を返信
-5. 再度 `morning` を手動実行 → 採点結果を確認
-6. 問題なければ `DRY_RUN_PENALTY` を削除（または `0`）
+2. `morning` workflow を手動実行 → 論文配信とクイズ出題を確認
+3. Discord で `A1: ... / A2: ... / A3: ...`（冒頭に `[読了]` 等）を返信
+4. 翌日、`morning` を再実行 → 採点結果＋次の論文配信を確認
+   （同日中は冪等ガードによりスキップされるため、採点確認は翌日か、`data/state.json` を消してから）
+5. 問題なければ `DRY_RUN_PENALTY` を削除（または `0`）
 
 ## Discord コマンド（次のジョブで反映）
 
@@ -73,5 +77,5 @@ Settings → Actions → General → Workflow permissions を **Read and write p
 ```bash
 pip install -r requirements.txt
 cd src
-python morning.py   # または python evening.py
+python morning.py
 ```
