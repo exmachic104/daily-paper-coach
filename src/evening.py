@@ -23,6 +23,11 @@ def run_evening() -> None:
         )
         return
 
+    # 既に投稿済みなら二重投稿しない（手動実行＋遅延スケジュールの重複対策）
+    if pending.get("posted"):
+        print("[evening] 既に出題投稿済みのためスキップします。")
+        return
+
     questions = pending.get("questions", [])
     title = pending.get("paper", {}).get("title", "本日の論文")
 
