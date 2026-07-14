@@ -136,6 +136,11 @@ def git_commit_and_push(message: str) -> None:
 
     push = run("push")
     if push.returncode != 0:
-        print("[store] git push 失敗:", push.stderr)
+        # 競合等で失敗したら rebase して1回だけ再試行（状態消失の防止）
+        print("[store] git push 失敗、rebase して再試行:", push.stderr)
+        run("pull", "--rebase")
+        push = run("push")
+    if push.returncode != 0:
+        print("[store] git push 再試行も失敗:", push.stderr)
     else:
         print("[store] commit & push 完了:", message)

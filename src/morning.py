@@ -248,11 +248,8 @@ def run_morning() -> None:
             store.git_commit_and_push(f"log: skip {today}")
             return  # pending_quiz は残し、翌日に同じ論文を再出題
 
-        if not pending.get("posted"):
-            # 前回の出題投稿に失敗していた → ペナルティ対象外
-            discord.post_text("ℹ️ 前回の出題が投稿されていなかったため、採点・ペナルティはありません。")
-        elif user_answers_raw.strip():
-            # 回答あり → 採点 & Beeminder 達成
+        if user_answers_raw.strip():
+            # 回答あり → posted に関わらず採点する（解答を取りこぼさない）
             result = _grade_and_post(pending, user_answers_raw)
             beeminder.submit_datapoint(f"answered {pending.get('date')}", value=1)
             store.append_log({
@@ -264,9 +261,9 @@ def run_morning() -> None:
                 "penalty": False,
                 "adjustment": result.get("adjustment"),
             })
-        else:
-            # 回答なし → データポイントを送らず derail（課金）
-            discord.post_text("⚠️ 前夜の出題への回答が確認できませんでした。未回答のためペナルティが発生します。")
+        elif pending.get("posted"):
+            # 出題済みなのに回答なし → データポイントを送らず derail（課金）
+            discord.post_text("⚠️ 前回の出題への回答が確認できませんでした。未回答のためペナルティが発生します。")
             store.append_log({
                 "date": pending.get("date", today),
                 "paper": paper,
@@ -275,6 +272,9 @@ def run_morning() -> None:
                 "results": [],
                 "penalty": True,
             })
+        else:
+            # 出題が投稿されておらず回答も無い → ペナルティ対象外
+            discord.post_text("ℹ️ 前回の出題が投稿されておらず回答も無いため、採点・ペナルティはありません。")
         store.clear_pending_quiz()
 
     # --- 次の論文の選定・配信・出題（同じ朝にクイズも投稿）---
