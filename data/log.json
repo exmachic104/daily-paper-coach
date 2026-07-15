@@ -151,5 +151,20 @@
     "penalty": false,
     "adjustment": "『限界・課題』の欠落が7/12・7/14・今回と3回連続で再発しているため、次回は論文終盤の限界記述を必ず読む時間配分を促し、限界を独立設問として問う。加えてSOGI/SOIFOの伝達関数の物理的意味（Q(s)が積分器になる理由、Bode線図の低周波傾き）を確認する基礎補強設問を追加。難易度は維持。",
     "recovered": true
+  },
+  {
+    "date": "2026-07-16",
+    "paper": {
+      "title": "A review of sensorless control methods for AC motor drives",
+      "s2_paper_id": "W2920644006",
+      "url": "https://openalex.org/W2920644006",
+      "pdf_url": "https://ieeexplore.ieee.org/ielx7/7873789/8326443/08326456.pdf",
+      "phase": 2,
+      "assigned_sections": "Abstract, Sec.III冒頭（PMSMセンサレスの2分類）, Sec.III-A（低速HFSI: FPS-PRHF, Fig.7-8）, Sec.III-B（モデルベース手法と高調波抑制, ADALINEフィルタ, Fig.9-12）, Sec.III-C（低周波数比の同期座標フルオーダオブザーバ, Fig.13-14）, Sec.IV(Conclusion)"
+    },
+    "answered": false,
+    "self_reported_status": null,
+    "results": [],
+    "penalty": true
   }
 ]

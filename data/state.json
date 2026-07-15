@@ -1,5 +1,5 @@
 {
-  "last_morning_date": "2026-07-15",
+  "last_morning_date": "2026-07-16",
   "delivered": [
     {
       "id": "W2798112335",
@@ -8,6 +8,10 @@
     {
       "id": "W2920644006",
       "title": "A review of sensorless control methods for AC motor drives"
+    },
+    {
+      "id": "arxiv:1207.5743v1",
+      "title": "Sensorless position estimation of Permanent-Magnet Synchronous Motors using a saturation model"
     }
   ]
 }
