@@ -112,5 +112,44 @@
     ],
     "penalty": false,
     "adjustment": "『限界・課題』を独立設問として問う傾向が過去ログでも繰り返し見られるため（7/12 Q3と同じ時間不足パターン）、次回は論文終盤（限界・パラメータ設計依存）まで読む時間配分を確保するよう読む範囲を後半重視に。難易度は維持し、tangent PLLの符号不変性の数式的機序に踏み込んだ設問を追加。"
+  },
+  {
+    "date": "2026-07-13",
+    "paper": {
+      "title": "Improved Nonlinear Flux Observer-Based Second-Order SOIFO for PMSM Sensorless Control",
+      "s2_paper_id": "W2798112335",
+      "url": "https://openalex.org/W2798112335",
+      "pdf_url": "https://vbn.aau.dk/ws/files/293136928/Improved_Nonlinear_Flux_Observer_Based_Second_Order_SOIFO_for_PMSM_Sensorless_Control.pdf",
+      "phase": 2,
+      "assigned_sections": "Sec.I(Introduction), Sec.II(Conventional PMSM Rotor Flux Observers), Sec.III(Flux Observer Based Second-Order SOIFO), Fig.5(Bode線図), Table I, Sec.IV(Experimental Results), Fig.12・Fig.15・Fig.21-23"
+    },
+    "answered": true,
+    "self_reported_status": "読了",
+    "results": [
+      {
+        "q": 1,
+        "verdict": "partial",
+        "cause": "概念の誤解",
+        "note": "純積分器の原点極・無限大ゲイン、LPFの位相ずれ・振幅減衰は正しく指摘。ただし『理想的DC入力がランプ応答となる』は表現が不正確で、実際の問題は初期積分値・オフセットに起因する直流成分が時間とともに増大して飽和・磁束歪みを招く点。また『両者の問題の性質の違い』（純積分器＝飽和・直流の問題、LPF＝位相/振幅精度の問題で速度情報が必要）という対比の明示が弱い。",
+        "explanation": "純積分器の欠点は『初期値や検出誤差による直流オフセットが原点極ゆえに減衰せず時間で増大→飽和・歪み、高調波抑制も弱い』と述べるのが正確です。対してLPFは直流と飽和は除去できるが基本波にθ1=arctan(ωc/ω1)の位相ずれと1/√(ω1²+ωc²)の振幅減衰を生じ、補償に速度情報が要る、という『飽和/直流 vs 精度』の対比を明記しましょう。"
+      },
+      {
+        "q": 2,
+        "verdict": "incorrect",
+        "cause": "概念の誤解",
+        "note": "SOIFOを『グリッド電圧の振幅・位相抽出に使う』としているが、これはSOGIの一般的な系統連系用途の説明であり本論文の応用ではない。本論文ではSOGIのQ(s)が定常で積分器(1/s)とみなせる点を利用し、逆EMFを入力にその積分としてロータ磁束を推定する。SOIFOが直流を残す理由も『ローパスだから』ではなく、低周波域が0dB/decで直流を完全除去できずAₒk/ω1に低減されるのみという点が核心。二次SOIFO必要性（低周波-20dB/dec・高周波-60dB/decで直流完全除去）への言及も欠落。",
+        "explanation": "本論文の応用は『SOGIのQ(s)≈1/s（積分器）を利用して逆EMFを積分し磁束を得る』構造です。SOIFOは位相ずれ・振幅減衰なく高調波を-40dB/decで減衰するが低周波0dB/decで直流を完全除去できず位置誤差が残る。だから二次SOIFO（4次、低周波-20dB/dec・高周波-60dB/dec）で最終値定理より直流を0にする、という周波数特性上の違いを述べると完全解答です。"
+      },
+      {
+        "q": 3,
+        "verdict": "partial",
+        "cause": "問題の読み違え",
+        "note": "実機検証・磁束ずれ/位置誤差の比較・二次SOIFOの改善量・直流外乱時の優位・パラメータミスマッチでの誤差残りと、定量結果を具体的に記述できており内容理解は高い。ただし設問後半の『残る限界は何か』への回答が、パラメータミスマッチ時の誤差に触れるにとどまり、論文が明記する本質的限界（s=jω'が分母にあるため零速・始動不可→開ループ始動が必要、高速では制御周期遅れで位置誤差が相対的に増大）への言及が欠落。",
+        "explanation": "限界は『分母にs=jω'を含むため零速・始動時には使えず開ループ始動が必要』『高速域では制御周期の遅れにより位置誤差が相対的に大きくなる』の2点が論文の指摘です。これを加えると完全解答になります。"
+      }
+    ],
+    "penalty": false,
+    "adjustment": "『限界・課題』の欠落が7/12・7/14・今回と3回連続で再発しているため、次回は論文終盤の限界記述を必ず読む時間配分を促し、限界を独立設問として問う。加えてSOGI/SOIFOの伝達関数の物理的意味（Q(s)が積分器になる理由、Bode線図の低周波傾き）を確認する基礎補強設問を追加。難易度は維持。",
+    "recovered": true
   }
 ]
