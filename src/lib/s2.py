@@ -196,15 +196,22 @@ def _search_arxiv(query: str, limit: int = 10) -> list[Candidate]:
 
 # ---- 統合検索 -------------------------------------------------------------
 
-def search(queries: list[str], exclude_ids: set[str], limit_per_query: int = 10) -> list[Candidate]:
+def search(
+    queries: list[str],
+    exclude_ids: set[str],
+    limit_per_query: int = 10,
+    exclude_titles: set[str] | None = None,
+) -> list[Candidate]:
     """複数クエリを3ソースで検索し、OA PDF のある候補を重複排除して返す。
 
     Semantic Scholar / OpenAlex / arXiv を毎回併用してマージする。1ソースが
-    失敗・0件でも他ソースで補える。ID とタイトルの両方で重複を排除する。
+    失敗・0件でも他ソースで補える。ID とタイトル（正規化）の両方で、既読・
+    配信済みおよびラン内重複を排除する。
     """
     candidates: list[Candidate] = []
     seen_ids: set[str] = set(exclude_ids)
-    seen_titles: set[str] = set()
+    # exclude_titles を初期集合にすることで既読タイトルもまとめて弾ける
+    seen_titles: set[str] = set(exclude_titles or set())
 
     def add(results: list[Candidate]) -> None:
         for c in results:

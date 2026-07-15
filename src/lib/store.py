@@ -54,14 +54,65 @@ def recent_log(days: int = 14) -> list[dict]:
     return load_log()[-days:]
 
 
+def _norm_title(t: str) -> str:
+    """重複排除用のタイトル正規化（s2 と同一ルール）。"""
+    import re
+
+    return re.sub(r"[^a-z0-9]", "", (t or "").lower())
+
+
 def read_paper_ids() -> set[str]:
-    """既読論文の s2_paper_id 集合（重複選定の回避に使う）。"""
+    """ログ由来の既読 s2_paper_id 集合。"""
     ids: set[str] = set()
     for rec in load_log():
         pid = (rec.get("paper") or {}).get("s2_paper_id")
         if pid:
             ids.add(pid)
     return ids
+
+
+def read_paper_titles() -> set[str]:
+    """ログ由来の既読タイトル（正規化）集合。"""
+    titles: set[str] = set()
+    for rec in load_log():
+        t = (rec.get("paper") or {}).get("title")
+        if t:
+            titles.add(_norm_title(t))
+    return titles
+
+
+# ---- 配信済み論文の記録（採点を待たずに既読化する） -----------------------
+
+def _delivered() -> list[dict]:
+    return _read_json(STATE_PATH, {}).get("delivered", [])
+
+
+def add_delivered(paper_id: str, title: str) -> None:
+    """配信した論文を state.json に記録する（重複選定の防止）。"""
+    state = _read_json(STATE_PATH, {})
+    lst = state.get("delivered", [])
+    if paper_id and not any(d.get("id") == paper_id for d in lst):
+        lst.append({"id": paper_id, "title": title})
+    state["delivered"] = lst
+    _write_json(STATE_PATH, state)
+
+
+def delivered_ids() -> set[str]:
+    return {d["id"] for d in _delivered() if d.get("id")}
+
+
+def delivered_titles() -> set[str]:
+    return {_norm_title(d["title"]) for d in _delivered() if d.get("title")}
+
+
+def excluded_ids() -> set[str]:
+    """選定から除外すべき id（ログ既読 + 配信済み）。"""
+    return read_paper_ids() | delivered_ids()
+
+
+def excluded_titles() -> set[str]:
+    """選定から除外すべきタイトル（ログ既読 + 配信済み、正規化）。"""
+    return read_paper_titles() | delivered_titles()
 
 
 # ---- ロードマップ ---------------------------------------------------------

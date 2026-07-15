@@ -81,8 +81,12 @@ def _select_and_deliver(user_requests: list[str], today: str) -> dict:
     if not queries:
         raise RuntimeError("検索クエリが生成されませんでした。")
 
-    # 候補を検索（既読を除外）
-    candidates = s2.search(queries, store.read_paper_ids())
+    # 候補を検索（既読・配信済みを id とタイトルの両方で除外）
+    candidates = s2.search(
+        queries,
+        store.excluded_ids(),
+        exclude_titles=store.excluded_titles(),
+    )
     if not candidates:
         raise RuntimeError("オープンアクセスPDFのある候補が見つかりませんでした。")
 
@@ -127,6 +131,9 @@ def _select_and_deliver(user_requests: list[str], today: str) -> dict:
                     break
     if chosen is None:
         raise RuntimeError("候補のPDFをいずれも取得できませんでした。")
+
+    # 配信が確定した時点で既読記録を残す（採点を待たず重複を防ぐ）
+    store.add_delivered(chosen.paper_id, chosen.title)
 
     paper_meta = {
         "title": chosen.title,
