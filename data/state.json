@@ -1,5 +1,5 @@
 {
-  "last_morning_date": "2026-07-16",
+  "last_morning_date": "2026-07-17",
   "delivered": [
     {
       "id": "W2798112335",
@@ -16,15 +16,6 @@
   ],
   "queue": [
     {
-      "title": "A review of sensorless control methods for AC motor drives",
-      "s2_paper_id": "W2920644006",
-      "pdf_url": "https://ieeexplore.ieee.org/ielx7/7873789/8326443/08326456.pdf",
-      "url": "https://ieeexplore.ieee.org/document/8326456",
-      "authors": [],
-      "year": null,
-      "venue": "IEEE"
-    },
-    {
       "title": "Sensorless position estimation of Permanent-Magnet Synchronous Motors using a saturation model",
       "s2_paper_id": "arxiv:1207.5743v1",
       "pdf_url": "https://arxiv.org/pdf/1207.5743v1",
@@ -34,5 +25,39 @@
       "venue": "arXiv"
     }
   ],
-  "active": null
+  "active": {
+    "paper": {
+      "title": "A review of sensorless control methods for AC motor drives",
+      "s2_paper_id": "W2920644006",
+      "url": "https://ieeexplore.ieee.org/document/8326456",
+      "pdf_url": "https://ieeexplore.ieee.org/ielx7/7873789/8326443/08326456.pdf",
+      "phase": null,
+      "authors": [],
+      "year": null,
+      "venue": "IEEE"
+    },
+    "summary": "本論文はAC電動機（IMおよびPMSM）のセンサレス制御の最新動向をまとめたレビューであり、特にPMSMでは低速・零速域と中高速域で有効な手法が異なるという根本課題を扱う。低速域の信号注入に伴う可聴騒音、モデルベース手法での高調波起因の位置推定誤差、そして中大容量・高周波駆動で問題となる低周波比条件という3つの実用課題に対する研究アプローチを紹介する。著者らが取り組んだ疑似ランダム注入、ADALINEフィルタ、同期座標系全次数オブザーバといった新規手法が大枠で提示される。",
+    "reading_plan": [
+      "Day1（Q1=課題把握）: Abstract, Sec.I, Sec.III冒頭とIII.A(1)を読み、PMSMセンサレス制御が低速域と高速域で手法を分ける必要がある理由、可聴騒音・低周波比が実用上なぜ問題になるのかを把握する。",
+      "Day2（Q2=手法理解）: Sec.III.A(FPS-PRHF, Fig.7-8), III.B(モデルベース手法とADALINEフィルタ, Fig.9-12), III.C(同期座標系全次数オブザーバ, Fig.13)を読み、各提案手法の核となる原理・仕組みを理解する。",
+      "Day3（Q3=進歩性）: Sec.III.A(2)のPSD比較, III.BのFig.12実験結果, III.CのFig.14実験結果, Sec.IV(Conclusion)を読み、従来手法との具体的改善点・定量的検証・残る限界を整理する。"
+    ],
+    "assigned_sections": "Abstract, Sec.I (Introduction), Sec.III (Sensorless Control Methods for PMSMs) 全体, Sec.III.A (Fig.7-8), Sec.III.B (Fig.9-12), Sec.III.C (Fig.13-14), Sec.IV (Conclusion)",
+    "roadmap_position": "（キューから消化）",
+    "questions": [
+      "Q1（課題把握）: PMSMセンサレス制御ではなぜ低速・零速域と中高速域で異なる手法が必要になるのか、それぞれの手法が反対の速度域で機能しなくなる根本的な理由を説明せよ。",
+      "Q2（手法理解）: モデルベース手法で生じる位置推定誤差のうち、ADALINEフィルタが標準的な低域通過フィルタ(LPF)では除去困難な成分をどのように除去するのか、その仕組みと収束を支える要素を述べよ。",
+      "Q3（進歩性）: 可聴騒音低減について、疑似ランダム注入(HPS-PRHF等)が従来の固定周波数注入(FFHF)に対しPSD(パワースペクトル密度)の観点でどう優れるか、また同期座標系全次数オブザーバによる低周波比制御の効果を、本文の定量的結果を挙げて説明せよ。"
+    ],
+    "model_answers": [
+      "モデルベース手法は逆起電力(back EMF)の基本波成分を検出するが、低速域ではEMFのSNRが小さすぎて観測できず破綻する。一方、信号注入法はインダクタンスの突極性(異方性)を利用するため低速・零速でも位置を導出できるが、高速域ではオブザーバ帯域の制限により性能が劣化する。このため両者を中速域で組み合わせるハイブリッド戦略が採られる。",
+      "IPMSMでは逆起電力に(1±6k)次高調波が現れ、推定位置に6k次のリップルが生じる。この高調波周波数は基本波に近くLPFでは分離困難だが、ADALINEフィルタは複数の高調波成分（sin/cos 5次,7次,(1±6k)次など）を入力とする多入力単出力の線形ニューロン構造で、適応相殺原理によりフィルタ重みを逐次自己調整し特定高調波を抽出・除去する。重み更新はLMSやRLSアルゴリズムが担い、収束と動特性を確保する。",
+      "FFHFでは励磁電流のPSDが注入周波数とその奇数次高調波に離散的に集中するのに対し、HPS-PRHFではエネルギーが周辺スペクトルに連続的に分散し、PSD全体レベルが低下するため可聴騒音を大幅に低減しつつ推定精度を維持できる。低周波比制御では、離散時間の同期座標系全次数オブザーバにより、周波数比fratio=2.5(4800r/min)という小さい値でも位置推定誤差を0.02π以内に抑え、安定なセンサレス動作を実現した。"
+    ],
+    "key_points": "Q1: モデルベース=基本波EMF検出→低速でSNR不足で破綻/信号注入=突極性(異方性)利用→高速でオブザーバ帯域制限で劣化。相補関係で中速域ハイブリッド。 Q2: (1±6k)次高調波→6k次位置リップル、周波数が基本波に近くLPFで除去困難。ADALINEは多入力単出力線形ニューロン、適応相殺原理で重み自己調整、LMS/RLSで更新。Fig.12で誤差9度→2度、6次リップル除去。 Q3: FFHF=離散スペクトル(注入周波数+奇数次高調波)、HPS-PRHF=連続スペクトルでエネルギー分散・総レベル低下→騒音低減かつ精度維持。同期座標系全次数オブザーバはfratio=2.5で誤差0.02π以内。限界: 注入法は振幅/周波数調整で精度・動特性・コストのトレードオフ、モデルベースはパラメータ変動・インバータ非線形性依存が残る。",
+    "cycle_day": 1,
+    "posted_date": "2026-07-17",
+    "quiz_message_id": "1527449420335939657",
+    "graded_date": null
+  }
 }
