@@ -13,5 +13,26 @@
       "id": "arxiv:1207.5743v1",
       "title": "Sensorless position estimation of Permanent-Magnet Synchronous Motors using a saturation model"
     }
-  ]
+  ],
+  "queue": [
+    {
+      "title": "A review of sensorless control methods for AC motor drives",
+      "s2_paper_id": "W2920644006",
+      "pdf_url": "https://ieeexplore.ieee.org/ielx7/7873789/8326443/08326456.pdf",
+      "url": "https://ieeexplore.ieee.org/document/8326456",
+      "authors": [],
+      "year": null,
+      "venue": "IEEE"
+    },
+    {
+      "title": "Sensorless position estimation of Permanent-Magnet Synchronous Motors using a saturation model",
+      "s2_paper_id": "arxiv:1207.5743v1",
+      "pdf_url": "https://arxiv.org/pdf/1207.5743v1",
+      "url": "https://arxiv.org/abs/1207.5743v1",
+      "authors": [],
+      "year": 2012,
+      "venue": "arXiv"
+    }
+  ],
+  "active": null
 }

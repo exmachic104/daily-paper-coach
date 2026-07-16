@@ -156,6 +156,42 @@ def set_last_morning_date(date: str) -> None:
     _write_json(STATE_PATH, state)
 
 
+# ---- 学習中の論文（active）と待ち行列（queue） --------------------------
+
+def get_active() -> dict | None:
+    """現在3日サイクルで学習中の論文の状態。無ければ None。"""
+    return _read_json(STATE_PATH, {}).get("active")
+
+
+def set_active(active: dict | None) -> None:
+    state = _read_json(STATE_PATH, {})
+    state["active"] = active
+    _write_json(STATE_PATH, state)
+
+
+def get_queue() -> list[dict]:
+    """未消化の論文キュー（新規検索より先にここから消化する）。"""
+    return _read_json(STATE_PATH, {}).get("queue", [])
+
+
+def set_queue(queue: list[dict]) -> None:
+    state = _read_json(STATE_PATH, {})
+    state["queue"] = queue
+    _write_json(STATE_PATH, state)
+
+
+def queue_pop() -> dict | None:
+    """キュー先頭を取り出す（無ければ None）。"""
+    state = _read_json(STATE_PATH, {})
+    q = state.get("queue", [])
+    if not q:
+        return None
+    item = q.pop(0)
+    state["queue"] = q
+    _write_json(STATE_PATH, state)
+    return item
+
+
 # ---- git --------------------------------------------------------------
 
 def git_commit_and_push(message: str) -> None:

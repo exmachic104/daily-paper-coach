@@ -227,18 +227,67 @@ def generate_delivery_and_quiz(
         f"論文メタ情報: {json.dumps(paper_meta, ensure_ascii=False)}\n"
         f"読むべきセクションの候補（参考。実際の論文の章立てと違えば無視してよい）: {assigned_sections_hint}\n"
         f"ロードマップ上の位置づけ: {roadmap_position}\n\n"
+        "この論文は3日間かけて読みます（1日あたり約10〜17分、合計30〜50分）。"
+        "各日1問ずつ、Day1=Q1（課題把握）、Day2=Q2（手法理解）、Day3=Q3（進歩性）に"
+        "答えられるよう、日ごとに読むセクションを割り当ててください。\n"
         "上記の論文について、次の JSON 形式で返してください:\n"
         "{\n"
-        '  "assigned_sections": "この論文で実際に読むべきセクションを、論文中に存在する章・節・図表名で簡潔に指定（例: Sec.1, 2.3-2.4, Fig.4-5）。存在しない章名を書かないこと。reading_guide と必ず一致させる",\n'
+        '  "assigned_sections": "この論文全体で読むべきセクションを、論文中に存在する章・節・図表名で簡潔に指定（例: Sec.1, 2.3-2.4, Fig.4-5）。存在しない章名を書かないこと",\n'
         '  "summary": "3〜4文の日本語要約。何が課題で、どんなアプローチを提案し、大枠で何が新しいかを見出しレベルで述べる。ただし切替の数値基準・具体的な機構・定量的な検証結果などクイズの答えは書かない",\n'
-        '  "reading_guide": "今日の読みどころ。どこを読むべきか・飛ばしてよい箇所・注目図表へ誘導する。クイズの答えは明かさない",\n'
-        '  "questions": ["Q1", "Q2", "Q3"],\n'
+        '  "reading_plan": ["Day1に読む範囲と狙い（Q1=課題把握。実在する章・図表名で）", "Day2（Q2=手法理解）", "Day3（Q3=進歩性）"],\n'
+        '  "questions": ["Q1（課題把握）", "Q2（手法理解）", "Q3（進歩性）"],\n'
         '  "model_answers": ["Q1の模範解答", "Q2の模範解答", "Q3の模範解答"],\n'
-        '  "key_points": "採点時に参照する、assigned_sections の内容の要点（日本語、箇条書き可）。ここには答えを詳しく書いてよい（配信されず採点時のみ使用）"\n'
-        "}"
+        '  "key_points": "採点時に参照する要点（日本語、箇条書き可）。ここには答えを詳しく書いてよい（配信されず採点時のみ使用）"\n'
+        "}\n"
+        "reading_plan は必ず3要素（Day1/Day2/Day3）。各日の読む範囲はその日の問いに答えられる箇所にし、"
+        "要約・reading_plan にクイズの答えそのものは書かないこと。"
     )
     content = build_paper_content(lead, pdf_bytes, pdf_text)
     return _message(system, content, max_tokens=5000)
+
+
+def grade_single(
+    active: dict, day_index: int, user_answer: str, recent_log: list[dict]
+) -> dict:
+    """その日の1問だけを採点し、誤答なら原因を推定する。"""
+    questions = active.get("questions", [])
+    model_answers = active.get("model_answers", [])
+    if not (0 <= day_index < len(questions)):
+        raise RuntimeError(f"day_index {day_index} が不正です。")
+    system = (
+        "あなたはPMSMセンサレス制御の学習コーチです。ユーザーの回答を1問だけ採点し、"
+        "誤答があれば原因を推定します。原因分類は次の4つのいずれか:\n"
+        "- 時間不足: 該当箇所まで読めていない\n"
+        "- 概念の誤解: 読んだが原理を取り違えている\n"
+        "- 前提知識の不足: 論文以前の基礎概念でつまずいている\n"
+        "- 問題の読み違え: 理解はしているが問いとずれた回答をしている\n"
+        "すべて日本語。必ず有効な JSON のみを返してください。"
+    )
+    context = {
+        "summary": active.get("summary"),
+        "key_points": active.get("key_points"),
+        "question": questions[day_index],
+        "model_answer": model_answers[day_index] if day_index < len(model_answers) else "",
+        "assigned_sections": active.get("assigned_sections"),
+    }
+    lead = (
+        "論文の要約・要点・今日の問い・模範解答:\n"
+        f"{json.dumps(context, ensure_ascii=False, indent=2)}\n\n"
+        "直近2週間の学習ログ（誤答傾向の文脈）:\n"
+        f"{json.dumps(recent_log, ensure_ascii=False, indent=2)}\n\n"
+        "ユーザーの回答（生テキスト。冒頭に読了状況 [読了]/[途中]/[未読] が付く想定）:\n"
+        f"{user_answer}\n\n"
+        "次の JSON 形式で採点結果を返してください:\n"
+        "{\n"
+        '  "reported_status": "読了 | 途中 | 未読（回答から推定）",\n'
+        '  "verdict": "correct|partial|incorrect",\n'
+        '  "cause": "誤答時のみ原因分類、正解ならnull",\n'
+        '  "note": "簡潔な解説",\n'
+        '  "explanation": "誤答時の補足（基礎トピックの提示など）",\n'
+        '  "advice": "次への一言アドバイス（日本語）"\n'
+        "}"
+    )
+    return _message(system, lead, max_tokens=2000)
 
 
 # ---- 4. 採点と誤答原因の推定 ----------------------------------------------
