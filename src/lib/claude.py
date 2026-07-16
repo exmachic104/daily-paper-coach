@@ -49,19 +49,30 @@ def _message(
     max_tokens: int = 4000,
     expect_json: bool = True,
 ) -> Any:
-    """Messages API を呼び出し、テキスト（or JSON）を返す。"""
+    """Messages API を呼び出し、テキスト（or JSON）を返す。
+
+    JSON 期待時、解析に失敗したら数回リトライする（一過性の不正 JSON 対策）。
+    """
     client = _get_client()
-    resp = client.messages.create(
-        model=config.ANTHROPIC_MODEL,
-        max_tokens=max_tokens,
-        system=system,
-        output_config={"effort": "medium"},
-        messages=[{"role": "user", "content": user_content}],
-    )
-    text = "".join(b.text for b in resp.content if b.type == "text")
-    if expect_json:
-        return _extract_json(text)
-    return text
+    attempts = 3 if expect_json else 1
+    last_err: Exception | None = None
+    for i in range(attempts):
+        resp = client.messages.create(
+            model=config.ANTHROPIC_MODEL,
+            max_tokens=max_tokens,
+            system=system,
+            output_config={"effort": "medium"},
+            messages=[{"role": "user", "content": user_content}],
+        )
+        text = "".join(b.text for b in resp.content if b.type == "text")
+        if not expect_json:
+            return text
+        try:
+            return _extract_json(text)
+        except (json.JSONDecodeError, ValueError) as e:
+            last_err = e
+            print(f"[claude] JSON 解析失敗 (試行 {i + 1}/{attempts}): {e}")
+    raise RuntimeError(f"Claude 応答の JSON 解析に失敗しました: {last_err}")
 
 
 # ---- PDF/テキストのコンテンツブロック化 -----------------------------------
