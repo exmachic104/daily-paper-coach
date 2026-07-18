@@ -12,12 +12,20 @@
 from __future__ import annotations
 
 import datetime
+import re
 import sys
 import traceback
 
 from lib import beeminder, claude, discord, s2, store
 
 _DAY_LABEL = {1: "課題把握", 2: "手法理解", 3: "進歩性"}
+
+# 生成物の先頭に混入しがちな 'Day1（…）:' 'Q1（…）:' 等のラベルを除去する
+_LABEL_RE = re.compile(r"^\s*(?:Day\s*\d+|Q\d+)(?:（[^）]*）)?\s*[:：]\s*")
+
+
+def _strip_label(text: str) -> str:
+    return _LABEL_RE.sub("", text or "")
 
 
 def _today() -> str:
@@ -169,7 +177,7 @@ def _activate_paper(fetched: dict, today: str) -> dict:
 
     authors_list = pm.get("authors") or []
     authors = ", ".join(authors_list[:4]) + (" et al." if len(authors_list) > 4 else "")
-    plan_lines = "\n".join(f"**Day{i}**: {reading_plan[i - 1]}" for i in range(1, 4))
+    plan_lines = "\n".join(f"**Day{i}**: {_strip_label(reading_plan[i - 1])}" for i in range(1, 4))
     description = (
         f"**要約**\n{gen.get('summary', '')}\n\n"
         f"**3日間の読書プラン**（1日約10〜17分）\n{plan_lines}\n\n"
@@ -227,8 +235,8 @@ def _post_question(active: dict, day: int) -> str | None:
     title = (active.get("paper") or {}).get("title", "本日の論文")
     lines = [
         f"📝 **今日のクイズ（Day{day}/3・{_DAY_LABEL.get(day, '')}）**", "",
-        f"**Q{day}.** {questions[day - 1]}", "",
-        f"📖 今日読む範囲: {read}", "",
+        f"**Q{day}.** {_strip_label(questions[day - 1])}", "",
+        f"📖 今日読む範囲: {_strip_label(read)}", "",
         "――――――――――――――",
         "このチャンネルに返信してください。冒頭に読了状況 `[読了]`/`[途中]`/`[未読]` を1つ添えて。",
         "期限: 明朝7:00の採点まで",
