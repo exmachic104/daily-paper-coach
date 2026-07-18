@@ -185,5 +185,24 @@
     "verdict": "partial",
     "cause": "概念の誤解",
     "penalty": false
+  },
+  {
+    "date": "2026-07-18",
+    "paper": {
+      "title": "A review of sensorless control methods for AC motor drives",
+      "s2_paper_id": "W2920644006",
+      "url": "https://ieeexplore.ieee.org/document/8326456",
+      "pdf_url": "https://ieeexplore.ieee.org/ielx7/7873789/8326443/08326456.pdf",
+      "phase": null,
+      "authors": [],
+      "year": null,
+      "venue": "IEEE"
+    },
+    "day": 2,
+    "answered": true,
+    "self_reported_status": "読了",
+    "verdict": "partial",
+    "cause": "概念の誤解",
+    "penalty": false
   }
 ]
