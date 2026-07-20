@@ -223,5 +223,24 @@
     "verdict": "partial",
     "cause": "問題の読み違え",
     "penalty": false
+  },
+  {
+    "date": "2026-07-20",
+    "paper": {
+      "title": "Sensorless position estimation of Permanent-Magnet Synchronous Motors using a saturation model",
+      "s2_paper_id": "arxiv:1207.5743v1",
+      "url": "https://arxiv.org/abs/1207.5743v1",
+      "pdf_url": "https://arxiv.org/pdf/1207.5743v1",
+      "phase": null,
+      "authors": [],
+      "year": 2012,
+      "venue": "arXiv"
+    },
+    "day": 1,
+    "answered": true,
+    "self_reported_status": "途中",
+    "verdict": "correct",
+    "cause": null,
+    "penalty": false
   }
 ]
