@@ -279,5 +279,33 @@
     "self_reported_status": null,
     "verdict": null,
     "penalty": true
+  },
+  {
+    "date": "2026-07-23",
+    "paper": {
+      "title": "Generalized High-Frequency Injection Framework for Sensorless Control of Synchronous Reluctance Machines",
+      "s2_paper_id": "W4385209769",
+      "url": "https://openalex.org/W4385209769",
+      "pdf_url": "https://ieeexplore.ieee.org/ielx7/8782706/10007667/10191029.pdf",
+      "phase": 3,
+      "authors": [
+        "Dmytro Prystupa",
+        "Xiaoyan Huang",
+        "He Zhang",
+        "Vasyl Varvolik",
+        "Giampaolo Buticchi",
+        "Shuo Wang",
+        "Xiaochen Zhang",
+        "Jing Li",
+        "Chris Gerada"
+      ],
+      "year": 2023,
+      "venue": "IEEE Open Journal of the Industrial Electronics Society"
+    },
+    "day": 1,
+    "answered": false,
+    "self_reported_status": null,
+    "verdict": null,
+    "penalty": true
   }
 ]
