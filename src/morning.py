@@ -28,6 +28,14 @@ def _strip_label(text: str) -> str:
     return _LABEL_RE.sub("", text or "")
 
 
+def _read_status(text: str) -> str | None:
+    """回答冒頭の読了タグ [読了]/[途中]/[未読] を抽出する。"""
+    for tag in ("読了", "途中", "未読"):
+        if f"[{tag}]" in text or f"【{tag}】" in text:
+            return tag
+    return None
+
+
 def _today() -> str:
     jst = datetime.timezone(datetime.timedelta(hours=9))
     return datetime.datetime.now(jst).strftime("%Y-%m-%d")
@@ -178,9 +186,25 @@ def _activate_paper(fetched: dict, today: str) -> dict:
     authors_list = pm.get("authors") or []
     authors = ", ".join(authors_list[:4]) + (" et al." if len(authors_list) > 4 else "")
     plan_lines = "\n".join(f"**Day{i}**: {_strip_label(reading_plan[i - 1])}" for i in range(1, 4))
+
+    prereqs = gen.get("prerequisites") or []
+    prereq_block = ""
+    if prereqs:
+        items = []
+        for p in prereqs[:6]:
+            if isinstance(p, dict):
+                items.append(f"・**{p.get('concept', '')}**: {p.get('intuition', '')}")
+            else:
+                items.append(f"・{p}")
+        prereq_block = "**前提知識（詰まらない最小限の直観）**\n" + "\n".join(items) + "\n\n"
+    skip = (gen.get("skip_sections") or "").strip()
+    skip_block = f"**初読で飛ばしてよい箇所**\n{skip}\n\n" if skip else ""
+
     description = (
         f"**要約**\n{gen.get('summary', '')}\n\n"
+        f"{prereq_block}"
         f"**3日間の読書プラン**（1日約10〜17分）\n{plan_lines}\n\n"
+        f"{skip_block}"
         f"**ロードマップ**\n{fetched.get('roadmap_position', '')}"
     )[:4000]
     embed = {
@@ -215,6 +239,10 @@ def _activate_paper(fetched: dict, today: str) -> dict:
         "roadmap_position": fetched.get("roadmap_position", ""),
         "questions": gen.get("questions", []),
         "model_answers": gen.get("model_answers", []),
+        "evidence_quotes": gen.get("evidence_quotes", []),
+        "evidence_sections": gen.get("evidence_sections", []),
+        "prerequisites": prereqs,
+        "skip_sections": skip,
         "key_points": gen.get("key_points"),
         "cycle_day": 1,
         "posted_date": today,
@@ -225,20 +253,31 @@ def _activate_paper(fetched: dict, today: str) -> dict:
     return active
 
 
-def _post_question(active: dict, day: int) -> str | None:
-    """その日の1問を、当日の読む範囲とともに投稿する。"""
+def _post_question(active: dict, day: int, extra: str | None = None, reduced: bool = False) -> str | None:
+    """その日の1問を、当日の読む範囲とともに投稿する。
+
+    extra: [途中] 時の重点解説など。reduced: [未読] 時に範囲を軽くする指示を添える。
+    """
     questions = active.get("questions", [])
     if not (1 <= day <= len(questions)):
         return None
     plan = active.get("reading_plan", [])
     read = plan[day - 1] if day - 1 < len(plan) else active.get("assigned_sections", "")
     title = (active.get("paper") or {}).get("title", "本日の論文")
+    read_line = _strip_label(read)
+    if reduced:
+        read_line = f"{read_line}\n（今日は範囲の前半だけで構いません。少しずつ進めましょう）"
     lines = [
         f"📝 **今日のクイズ（Day{day}/3・{_DAY_LABEL.get(day, '')}）**", "",
         f"**Q{day}.** {_strip_label(questions[day - 1])}", "",
-        f"📖 今日読む範囲: {_strip_label(read)}", "",
+        f"📖 今日読む範囲: {read_line}", "",
+    ]
+    if extra:
+        lines += [f"💡 **ヒント（前回の詰まりに対応）**\n{extra}", ""]
+    lines += [
         "――――――――――――――",
         "このチャンネルに返信してください。冒頭に読了状況 `[読了]`/`[途中]`/`[未読]` を1つ添えて。",
+        "詰まった箇所があれば具体的に書いてください（次回そこを重点解説します）。",
         "期限: 明朝7:00の採点まで",
     ]
     return discord.post_embed({
@@ -246,6 +285,17 @@ def _post_question(active: dict, day: int) -> str | None:
         "description": "\n".join(lines)[:4000],
         "color": 0xF28E2B,
     })
+
+
+def _maybe_hint(active: dict, day_index: int, answer_text: str) -> str | None:
+    """[途中] 回答に実質的な記述があれば、詰まりに対応するヒントを生成する。"""
+    if len(answer_text.strip()) < 8:
+        return None
+    try:
+        return claude.explain_stuck(active, day_index, answer_text)
+    except Exception as e:  # noqa: BLE001
+        print(f"[morning] ヒント生成失敗: {e}")
+        return None
 
 
 def _post_single_grade(result: dict, day: int) -> None:
@@ -275,6 +325,8 @@ def run_morning() -> None:
     after_id = active.get("quiz_message_id") if active else None
     user_answers_raw, commands = _collect_user_input(after_id)
     user_requests = [r for r in (commands.get("request"), commands.get("feedback")) if r]
+    answered = bool(user_answers_raw.strip())
+    status = _read_status(user_answers_raw)
 
     # --- !skip: 今日は休み。採点・出題を持ち越す ---
     if commands.get("skip"):
@@ -320,24 +372,47 @@ def run_morning() -> None:
         # 採点を配信の前に確定コミット（二重実行時の再採点/二重ペナルティ防止）
         store.git_commit_and_push(f"morning {today}: grade Day{day}")
 
-    # --- Phase 2: 当日の問いを出す（本日出題済みなら確定のみ）---
+    # --- Phase 2: 当日の問いを出す（読了タグで進む/留まるを分岐）---
     active = store.get_active()
     if active and active.get("posted_date") == today:
+        # 本日出題済み（二重実行）→ 確定のみ
         store.set_last_morning_date(today)
         store.git_commit_and_push(f"morning {today}: finalize")
         return
 
-    if active and active.get("cycle_day", 1) < 3:
-        # 同じ論文の次の日の問い
-        day = active["cycle_day"] + 1
-        active["cycle_day"] = day
-        active["quiz_message_id"] = _post_question(active, day)
-        active["posted_date"] = today
-        store.set_active(active)
+    if active is None:
+        # 初回 → 次の論文をアクティブ化（Day1）
+        store.set_active(_activate_paper(_fetch_next_paper(user_requests, today), today))
     else:
-        # 3日サイクル完了、または初回 → 次の論文をアクティブ化（Day1）
-        fetched = _fetch_next_paper(user_requests, today)
-        store.set_active(_activate_paper(fetched, today))
+        day = active.get("cycle_day", 1)
+        if not answered:
+            # 未回答 → 進めず同じ問いを再掲（ペナルティは Phase1 で通知済み）
+            active["quiz_message_id"] = _post_question(active, day, reduced=active.get("reduced", False))
+            active["posted_date"] = today
+            store.set_active(active)
+        elif status == "途中":
+            # 途中 → 進めず同じ問いを再掲。詰まりに対応するヒントを添える
+            hint = _maybe_hint(active, day - 1, user_answers_raw)
+            active["quiz_message_id"] = _post_question(active, day, extra=hint,
+                                                        reduced=active.get("reduced", False))
+            active["posted_date"] = today
+            store.set_active(active)
+        elif status == "未読":
+            # 未読 → 進めず、範囲を軽くして同じ問いを再掲
+            active["reduced"] = True
+            active["quiz_message_id"] = _post_question(active, day, reduced=True)
+            active["posted_date"] = today
+            store.set_active(active)
+        elif day < 3:
+            # 読了（またはタグ無しの回答）→ 次の日へ進む
+            active["reduced"] = False
+            active["cycle_day"] = day + 1
+            active["quiz_message_id"] = _post_question(active, day + 1)
+            active["posted_date"] = today
+            store.set_active(active)
+        else:
+            # 3日サイクル完了 → 次の論文をアクティブ化（Day1）
+            store.set_active(_activate_paper(_fetch_next_paper(user_requests, today), today))
 
     store.set_last_morning_date(today)
     store.git_commit_and_push(f"morning {today}: advance")

@@ -208,45 +208,66 @@ def generate_delivery_and_quiz(
     確定する（選定ステップの推測はあくまで参考）。読みどころと必ず整合させる。
     """
     system = (
-        "あなたはPMSMセンサレス制御の学習コーチです。与えられた論文を3日間で読むための"
+        "あなたはPMSMセンサレス制御の学習コーチです。与えられた論文を1日約15分×3日で読むための"
         "日本語ガイドと、毎日1問ずつの理解度確認クイズ3問を作成します。\n"
         "出題カテゴリは固定（ただし要約より深い粒度にすること）:\n"
         "- Q1（課題把握）: この論文が解決しようとした課題の本質・なぜそれが問題なのか\n"
         "- Q2（手法理解）: 提案手法の核となる仕組み・原理（切替基準や設計の要点など）\n"
         "- Q3（進歩性）: 従来手法と比べた具体的な改善点・検証方法・残る限界\n\n"
-        "【最重要・読む範囲と問いの整合性】3日間の読書プラン(reading_plan)と問い(questions)は"
-        "厳密に対応させること:\n"
-        "- Q1 は Day1 の読む範囲『だけ』で答えられること。Q2 は Day1+Day2 の範囲で、"
-        "Q3 は Day1〜Day3 全体で答えられること。\n"
-        "- 各日の読む範囲には、その日の問いに答えるのに必要な箇所を必ず含めること。"
-        "逆に、その日までの読む範囲に含まれない内容を、その日の問いで問わないこと。\n"
-        "- Q1 は課題の所在・なぜ問題かを問うにとどめ、提案手法の内部原理は問わない"
-        "（手法の詳細は Day2 以降で読むため）。手法の仕組みは Q2、定量的な優位性・限界は Q3 で問う。\n"
-        "- 各日の読む範囲は約15分（10〜17分）で読める分量に収めること。\n"
-        "出力する前に、各 Q が『対応する日までの読む範囲だけ』で本当に答えられるか自己確認し、"
-        "答えられない場合は読む範囲か問いを調整すること。\n"
+        "【最重要・範囲内自己検証（逐語引用の強制）】各問について、その答えの根拠となる文を、"
+        "『その日までの読む範囲(reading_plan)の中』から**逐語で**引用すること（evidence_quotes）。"
+        "- Q1 は Day1 の範囲、Q2 は Day1+Day2、Q3 は Day1〜Day3 全体から引用すること。\n"
+        "- 問いが複数の論点を含む場合（例: 低速側と高速側の両方の理由）、論点ごとに引用を用意すること。\n"
+        "- ある論点について、その日までの範囲から逐語引用が取れない場合は、"
+        "『その論点が書かれている節を reading_plan の該当日に追加して範囲を広げる』か、"
+        "『問いをその日の範囲だけで答えられる形に狭める』こと。範囲外の内容を問うてはならない。\n"
+        "- 引用は論文本文からの完全な逐語コピーにすること（後で検証可能にするため。要約や言い換えは不可）。\n"
+        "- 各日の読む範囲は約15分（10〜17分）で読める分量に収めること。\n\n"
+        "【前提知識・読み飛ばし】\n"
+        "- prerequisites: この論文で詰まらないために必要な前提概念を列挙する。各概念に、厳密な理解ではなく"
+        "『この論文で詰まらない最小限の直観』を2〜3文で書く（教科書的解説は禁止。長くしない）。\n"
+        "- skip_sections: 初読で飛ばしてよい箇所を明示する（例: 定理の厳密な証明は結論だけ使えば先に進める）。\n\n"
         "【ネタバレ防止】要約(summary)と読書プランは『何を扱うか・なぜ重要か・どこを読むか』の"
-        "動機づけに留め、クイズの答えそのもの（具体的な仕組み・数値基準・定量結果・新規性の核心）は"
-        "書かないこと。要約の文言をなぞるだけの問いも禁止。\n"
+        "動機づけに留め、クイズの答えそのものは書かないこと。要約の文言をなぞるだけの問いも禁止。\n"
         "各問は短い文章(1〜3文)で答えられる形式。すべて日本語。必ず有効な JSON のみを返してください。"
     )
     lead = (
         f"論文メタ情報: {json.dumps(paper_meta, ensure_ascii=False)}\n"
         f"読むべきセクションの候補（参考。実際の論文の章立てと違えば無視してよい）: {assigned_sections_hint}\n"
         f"ロードマップ上の位置づけ: {roadmap_position}\n\n"
-        "次の JSON 形式で返してください（配列は必ず3要素、Day1/Day2/Day3 と Q1/Q2/Q3 が対応）:\n"
+        "次の JSON 形式で返してください（reading_plan/questions/evidence_quotes/evidence_sections/"
+        "model_answers は必ず3要素、Day1/Day2/Day3 と Q1/Q2/Q3 が対応）:\n"
         "{\n"
-        '  "assigned_sections": "論文全体で読むべきセクションを、実在する章・節・図表名で簡潔に（例: Sec.1, 2.3-2.4, Fig.4-5）",\n'
-        '  "summary": "3〜4文の日本語要約。何が課題で、どんなアプローチを提案し、大枠で何が新しいかを見出しレベルで。クイズの答えは書かない",\n'
-        '  "reading_plan": ["その日に読む範囲と狙いの本文のみ。実在する章・図表名で。接頭辞（Day1 等）は付けない", "…", "…"],\n'
+        '  "assigned_sections": "論文全体で読むべきセクションを実在する章・節・図表名で（例: Sec.1, 2.3-2.4, Fig.4-5）",\n'
+        '  "summary": "3〜4文の日本語要約。見出しレベル。クイズの答えは書かない",\n'
+        '  "prerequisites": [{"concept": "前提概念名", "intuition": "詰まらない最小限の直観を2〜3文で", "why": "この論文のどこで必要か"}],\n'
+        '  "skip_sections": "初読で飛ばしてよい箇所（無ければ空文字）",\n'
+        '  "reading_plan": ["その日に読む範囲と狙いの本文のみ。接頭辞（Day1 等）は付けない", "…", "…"],\n'
         '  "questions": ["問いの本文のみ。接頭辞（Q1 等）は付けない", "…", "…"],\n'
+        '  "evidence_quotes": [["Q1の答えの根拠となる、Day1範囲からの逐語引用（論点ごとに1件、計1〜3件）"], ["Q2用（Day1+2から）"], ["Q3用（全体から）"]],\n'
+        '  "evidence_sections": [["各引用の出所（節・式番号）"], ["…"], ["…"]],\n'
         '  "model_answers": ["Q1の模範解答", "Q2の模範解答", "Q3の模範解答"],\n'
-        '  "key_points": "採点時に参照する要点（日本語、箇条書き可）。答えを詳しく書いてよい（配信されず採点時のみ使用）"\n'
+        '  "key_points": "採点時に参照する要点（配信されず採点時のみ使用）"\n'
         "}\n"
-        "各配列要素の先頭に『Day1』『Q1』などのラベルを書かないこと（表示側で付与するため）。"
+        "各配列要素の先頭に『Day1』『Q1』などのラベルを書かないこと（表示側で付与する）。"
     )
     content = build_paper_content(lead, pdf_bytes, pdf_text)
-    return _message(system, content, max_tokens=5000)
+    gen = _message(system, content, max_tokens=6000)
+
+    # 範囲内自己検証: 各問に逐語引用があるか軽く点検（無ければ1回だけ再生成）
+    def _has_evidence(g: dict) -> bool:
+        ev = g.get("evidence_quotes") or []
+        return len(ev) >= 3 and all(isinstance(e, list) and any(str(x).strip() for x in e) for e in ev[:3])
+
+    if not _has_evidence(gen):
+        print("[claude] evidence_quotes が不足のため1回再生成します。")
+        retry_lead = lead + (
+            "\n\n前回の出力は各問の evidence_quotes（指定範囲からの逐語引用）が不足していました。"
+            "必ず全問に、その日までの範囲からの逐語引用を付けてください。"
+            "引用が取れない問いは、範囲を広げるか問いを狭めて調整してください。"
+        )
+        gen = _message(system, build_paper_content(retry_lead, pdf_bytes, pdf_text), max_tokens=6000)
+    return gen
 
 
 def grade_single(
@@ -257,9 +278,19 @@ def grade_single(
     model_answers = active.get("model_answers", [])
     if not (0 <= day_index < len(questions)):
         raise RuntimeError(f"day_index {day_index} が不正です。")
+    evidence_quotes = active.get("evidence_quotes") or []
+    evidence = evidence_quotes[day_index] if day_index < len(evidence_quotes) else []
+    evidence_sections = active.get("evidence_sections") or []
+    ev_sections = evidence_sections[day_index] if day_index < len(evidence_sections) else []
+
     system = (
         "あなたはPMSMセンサレス制御の学習コーチです。ユーザーの回答を1問だけ採点し、"
-        "誤答があれば原因を推定します。原因分類は次の4つのいずれか:\n"
+        "誤答があれば原因を推定します。\n"
+        "【採点基準】模範解答との表現一致ではなく、論文本文からの逐語引用(evidence_quotes)との"
+        "『内容の整合』で正誤を判定すること。模範解答と言い回しが異なっても、evidence_quotes の"
+        "内容と整合していれば正答とする。誤りを指摘する際は、根拠として本文の該当箇所（evidence_sections の"
+        "節・式番号）を提示すること。\n"
+        "原因分類は次の4つのいずれか:\n"
         "- 時間不足: 該当箇所まで読めていない\n"
         "- 概念の誤解: 読んだが原理を取り違えている\n"
         "- 前提知識の不足: 論文以前の基礎概念でつまずいている\n"
@@ -267,69 +298,50 @@ def grade_single(
         "すべて日本語。必ず有効な JSON のみを返してください。"
     )
     context = {
-        "summary": active.get("summary"),
-        "key_points": active.get("key_points"),
         "question": questions[day_index],
-        "model_answer": model_answers[day_index] if day_index < len(model_answers) else "",
+        "evidence_quotes": evidence,
+        "evidence_sections": ev_sections,
+        "model_answer_reference": model_answers[day_index] if day_index < len(model_answers) else "",
+        "key_points": active.get("key_points"),
         "assigned_sections": active.get("assigned_sections"),
     }
     lead = (
-        "論文の要約・要点・今日の問い・模範解答:\n"
+        "今日の問いと、正誤判定の基準となる本文からの逐語引用（evidence_quotes）:\n"
         f"{json.dumps(context, ensure_ascii=False, indent=2)}\n\n"
         "直近2週間の学習ログ（誤答傾向の文脈）:\n"
         f"{json.dumps(recent_log, ensure_ascii=False, indent=2)}\n\n"
         "ユーザーの回答（生テキスト。冒頭に読了状況 [読了]/[途中]/[未読] が付く想定）:\n"
         f"{user_answer}\n\n"
-        "次の JSON 形式で採点結果を返してください:\n"
+        "evidence_quotes と照らして採点し、次の JSON 形式で返してください:\n"
         "{\n"
         '  "reported_status": "読了 | 途中 | 未読（回答から推定）",\n'
         '  "verdict": "correct|partial|incorrect",\n'
         '  "cause": "誤答時のみ原因分類、正解ならnull",\n'
-        '  "note": "簡潔な解説",\n'
-        '  "explanation": "誤答時の補足（基礎トピックの提示など）",\n'
+        '  "note": "簡潔な解説（根拠の節・式番号を含める）",\n'
+        '  "explanation": "誤答時の補足（前提知識の提示など）",\n'
         '  "advice": "次への一言アドバイス（日本語）"\n'
         "}"
     )
     return _message(system, lead, max_tokens=2000)
 
 
-# ---- 4. 採点と誤答原因の推定 ----------------------------------------------
-
-def grade(quiz: dict, user_answers_raw: str, recent_log: list[dict]) -> dict:
-    """回答を採点し、誤答の原因を推定してフィードバックを生成する。"""
+def explain_stuck(active: dict, day_index: int, answer_text: str) -> str:
+    """[途中] 回答の詰まりに対する、答えを与えない最小限のヒントを生成する。"""
+    questions = active.get("questions", [])
+    q = questions[day_index] if 0 <= day_index < len(questions) else ""
+    ev = active.get("evidence_quotes") or []
+    evidence = ev[day_index] if day_index < len(ev) else []
     system = (
-        "あなたはPMSMセンサレス制御の学習コーチです。ユーザーの回答を採点し、"
-        "誤答があればその原因を推定します。原因分類は次の4つのいずれか:\n"
-        "- 時間不足: 該当箇所まで読めていない\n"
-        "- 概念の誤解: 読んだが原理を取り違えている\n"
-        "- 前提知識の不足: 論文以前の基礎概念でつまずいている\n"
-        "- 問題の読み違え: 理解はしているが問いとずれた回答をしている\n"
-        "すべて日本語。必ず有効な JSON のみを返してください。"
+        "あなたはPMSMセンサレス制御の学習コーチです。学習者が今日の問いで詰まっています。"
+        "答えを直接与えず、詰まりを解くための最小限のヒントを2〜3文で示してください。"
+        "必要なら関連する前提概念の直観や、本文の該当箇所（節・式番号）を指し示してください。"
+        "テキストのみを返してください（JSONにしない）。"
     )
-    context = {
-        "summary": quiz.get("summary"),
-        "key_points": quiz.get("key_points"),
-        "questions": quiz.get("questions"),
-        "model_answers": quiz.get("model_answers"),
-        "assigned_sections": quiz.get("assigned_sections"),
+    payload = {
+        "question": q,
+        "evidence_quotes": evidence,
+        "prerequisites": active.get("prerequisites") or [],
+        "learner_answer": answer_text,
     }
-    lead = (
-        "論文の要約・要点・出題・模範解答:\n"
-        f"{json.dumps(context, ensure_ascii=False, indent=2)}\n\n"
-        "直近2週間の学習ログ（誤答傾向の文脈）:\n"
-        f"{json.dumps(recent_log, ensure_ascii=False, indent=2)}\n\n"
-        "ユーザーの回答（生テキスト。冒頭に読了状況 [読了]/[途中]/[未読] が付く想定）:\n"
-        f"{user_answers_raw}\n\n"
-        "次の JSON 形式で採点結果を返してください:\n"
-        "{\n"
-        '  "reported_status": "読了 | 途中 | 未読（回答から推定）",\n'
-        '  "results": [\n'
-        '    {"q": 1, "verdict": "correct|partial|incorrect", "cause": "誤答時のみ原因分類、正解ならnull", '
-        '"note": "簡潔な解説", "explanation": "誤答時の補足（基礎トピックの提示など）"}\n'
-        "  ],\n"
-        '  "advice": "採点結果を踏まえた次回への一言アドバイス（日本語）",\n'
-        '  "adjustment": "翌日以降の選定への反映提案（例: 同テーマの易しめ、基礎解説を追加、読む範囲を狭める）"\n'
-        "}\n"
-        "results は3問分、q は 1,2,3 の順で必ず含めてください。"
-    )
-    return _message(system, lead, max_tokens=3000)
+    lead = "次の情報をもとにヒントを作成:\n" + json.dumps(payload, ensure_ascii=False, indent=2)
+    return _message(system, lead, max_tokens=600, expect_json=False)
