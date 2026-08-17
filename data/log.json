@@ -891,5 +891,29 @@
     "self_reported_status": null,
     "verdict": null,
     "penalty": true
+  },
+  {
+    "date": "2026-08-17",
+    "paper": {
+      "title": "An Improved Delay-Suppressed Sliding-Mode Observer for Sensorless Vector-Controlled PMSM",
+      "s2_paper_id": "W2988299278",
+      "url": "https://openalex.org/W2988299278",
+      "pdf_url": "https://eprints.whiterose.ac.uk/162707/1/An_improved_delay_suppressed_sliding_mode_observer.pdf",
+      "phase": 3,
+      "authors": [
+        "Chao Gong",
+        "Yihua Hu",
+        "Jinqiu Gao",
+        "Yangang Wang",
+        "Liming Yan"
+      ],
+      "year": 2019,
+      "venue": "IEEE Transactions on Industrial Electronics"
+    },
+    "day": 1,
+    "answered": false,
+    "self_reported_status": null,
+    "verdict": null,
+    "penalty": true
   }
 ]
