@@ -104,6 +104,87 @@ def _extract_pdf_text(pdf_bytes: bytes) -> str | None:
         return None
 
 
+_ALNUM_RE = re.compile(r"[^0-9a-zA-Z぀-ヿ一-鿿]+")
+_SECTION_RE = re.compile(
+    r"(sec|section|fig|figure|tab|table|eq|equation|章|節|式|図|表)\.?\s*"
+    r"([0-9]+|[IVXivx]+)(?:[.\-–]([0-9]+))?",
+    re.IGNORECASE,
+)
+
+
+_LIGATURES = {"ﬁ": "fi", "ﬂ": "fl", "ﬀ": "ff", "ﬃ": "ffi", "ﬄ": "ffl", "ﬅ": "st"}
+
+
+def _squash(text: str) -> str:
+    """引用照合用の正規化。空白・記号・ハイフン折り返し・合字の差を吸収する。"""
+    text = text or ""
+    for lig, plain in _LIGATURES.items():
+        text = text.replace(lig, plain)
+    return _ALNUM_RE.sub("", text).lower()
+
+
+def _section_tokens(text: str) -> set[str]:
+    """『Sec.III.A』『Fig.7』『式(12)』などを kind+number のトークン集合にする。"""
+    tokens = set()
+    for kind, num, sub in _SECTION_RE.findall(text or ""):
+        kind = {"section": "sec", "figure": "fig", "table": "tab", "equation": "eq",
+                "章": "sec", "節": "sec", "式": "eq", "図": "fig", "表": "tab"}.get(
+            kind.lower(), kind.lower())
+        tokens.add(f"{kind}{num.lower()}")
+        if sub:
+            tokens.add(f"{kind}{num.lower()}.{sub}")
+    return tokens
+
+
+def verify_evidence(gen: dict, pdf_bytes: bytes | None, pdf_text: str | None) -> list[str]:
+    """修正1の検証。引用が本文に実在し、その日の読む範囲と整合するかを点検する。
+
+    戻り値は問題点の説明リスト（空なら合格）。判定できない場合は緩く通す
+    （朝ジョブを止めないため。検証は締め出しではなく再生成の材料）。
+    """
+    problems: list[str] = []
+    quotes = gen.get("evidence_quotes") or []
+    sections = gen.get("evidence_sections") or []
+    plan = gen.get("reading_plan") or []
+
+    for i in range(3):
+        day_quotes = [str(q) for q in (quotes[i] if i < len(quotes) else []) if str(q).strip()]
+        if not day_quotes:
+            problems.append(f"Q{i + 1}: 逐語引用(evidence_quotes)が無い")
+
+    body = _squash(pdf_text) if pdf_text else None
+    if body is None and pdf_bytes:
+        body = _squash(_extract_pdf_text(pdf_bytes) or "")
+    if body is not None and len(body) < 2000:
+        # 抽出に失敗した/スキャンPDF等。全引用を偽陽性にしないため実在照合は行わない
+        print(f"[claude] 本文の抽出が不十分（{len(body)}字）のため引用の実在照合は省略します。")
+        body = None
+    if body:
+        for i in range(3):
+            for q in (quotes[i] if i < len(quotes) else []):
+                squashed = _squash(str(q))
+                if len(squashed) < 20:
+                    continue  # 短すぎる断片は照合対象外
+                if squashed not in body:
+                    problems.append(
+                        f"Q{i + 1}: 引用「{str(q)[:40]}…」が論文本文に見つからない（逐語ではない）"
+                    )
+
+    # 引用の出所が『その日までの読む範囲』と噛み合っているか
+    for i in range(3):
+        day_sections = " ".join(str(s) for s in (sections[i] if i < len(sections) else []))
+        ev_tokens = _section_tokens(day_sections)
+        plan_tokens: set[str] = set()
+        for d in range(i + 1):
+            if d < len(plan):
+                plan_tokens |= _section_tokens(str(plan[d]))
+        if ev_tokens and plan_tokens and not (ev_tokens & plan_tokens):
+            problems.append(
+                f"Q{i + 1}: 引用の出所({day_sections})がDay1〜Day{i + 1}の読む範囲に含まれていない"
+            )
+    return problems
+
+
 def build_paper_content(
     lead_text: str,
     pdf_bytes: bytes | None,
@@ -254,19 +335,28 @@ def generate_delivery_and_quiz(
     content = build_paper_content(lead, pdf_bytes, pdf_text)
     gen = _message(system, content, max_tokens=6000)
 
-    # 範囲内自己検証: 各問に逐語引用があるか軽く点検（無ければ1回だけ再生成）
-    def _has_evidence(g: dict) -> bool:
-        ev = g.get("evidence_quotes") or []
-        return len(ev) >= 3 and all(isinstance(e, list) and any(str(x).strip() for x in e) for e in ev[:3])
-
-    if not _has_evidence(gen):
-        print("[claude] evidence_quotes が不足のため1回再生成します。")
+    # 範囲内自己検証（修正1）: 引用の有無・本文への実在・出所と読む範囲の整合を点検し、
+    # 問題があれば問題点を添えて1回だけ再生成する。
+    problems = verify_evidence(gen, pdf_bytes, pdf_text)
+    if problems:
+        print("[claude] 範囲内自己検証に不合格のため1回再生成します:")
+        for p in problems:
+            print(f"  - {p}")
         retry_lead = lead + (
-            "\n\n前回の出力は各問の evidence_quotes（指定範囲からの逐語引用）が不足していました。"
-            "必ず全問に、その日までの範囲からの逐語引用を付けてください。"
-            "引用が取れない問いは、範囲を広げるか問いを狭めて調整してください。"
+            "\n\n前回の出力は範囲内自己検証に不合格でした。指摘は次の通りです:\n"
+            + "\n".join(f"- {p}" for p in problems)
+            + "\n必ず全問に、その日までの読む範囲からの完全な逐語引用（論文本文からのコピー）を付け、"
+            "引用の出所(evidence_sections)がその日までの reading_plan に含まれる節・図表・式であるように"
+            "してください。引用が取れない問いは、その論点が書かれた節を reading_plan の該当日に追加するか、"
+            "問いをその日の範囲だけで答えられる形に狭めてください。"
         )
         gen = _message(system, build_paper_content(retry_lead, pdf_bytes, pdf_text), max_tokens=6000)
+        remaining = verify_evidence(gen, pdf_bytes, pdf_text)
+        if remaining:
+            # 朝の配信は止めない。残った不整合はログに残して次回の材料にする。
+            print("[claude] 再生成後も残る不整合（配信は継続します）:")
+            for p in remaining:
+                print(f"  - {p}")
     return gen
 
 
@@ -295,6 +385,10 @@ def grade_single(
         "- 概念の誤解: 読んだが原理を取り違えている\n"
         "- 前提知識の不足: 論文以前の基礎概念でつまずいている\n"
         "- 問題の読み違え: 理解はしているが問いとずれた回答をしている\n"
+        "【詰まりの検出】回答文（『式(29)のSが分からない』等の記述を含む）と誤答の内容から、"
+        "つまずきの原因になっている前提概念を特定し、blocking_concepts に列挙すること。"
+        "prerequisites に挙がっている概念名から選ぶことを優先し、該当が無ければ空配列にする。"
+        "推測で埋めないこと（確かな手がかりが無ければ空配列）。\n"
         "すべて日本語。必ず有効な JSON のみを返してください。"
     )
     context = {
@@ -304,6 +398,9 @@ def grade_single(
         "model_answer_reference": model_answers[day_index] if day_index < len(model_answers) else "",
         "key_points": active.get("key_points"),
         "assigned_sections": active.get("assigned_sections"),
+        "prerequisites": [
+            p.get("concept") for p in (active.get("prerequisites") or []) if isinstance(p, dict)
+        ],
     }
     lead = (
         "今日の問いと、正誤判定の基準となる本文からの逐語引用（evidence_quotes）:\n"
@@ -319,6 +416,7 @@ def grade_single(
         '  "cause": "誤答時のみ原因分類、正解ならnull",\n'
         '  "note": "簡潔な解説（根拠の節・式番号を含める）",\n'
         '  "explanation": "誤答時の補足（前提知識の提示など）",\n'
+        '  "blocking_concepts": ["つまずきの原因になっている前提概念名。無ければ空配列"],\n'
         '  "advice": "次への一言アドバイス（日本語）"\n'
         "}"
     )

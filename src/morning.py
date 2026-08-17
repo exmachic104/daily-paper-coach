@@ -169,15 +169,104 @@ def _fetch_next_paper(user_requests: list[str], today: str) -> dict:
     }
 
 
-def _activate_paper(fetched: dict, today: str) -> dict:
-    """論文を配信し、3日サイクルの active 状態を作って Day1 の問いを出す。"""
+_THEORY_KW = ["averaging", "observability", "lyapunov", "port-hamiltonian", "passivity",
+              "automatica", "math.oc", "nonlinear", "manifold", "contraction", "riemann"]
+_PRACTICAL_KW = ["industrial electronics", "power electronics", "transactions on ind",
+                 "tie", "tia", "tpel", "drive", "implementation", "dsp", "experimental"]
+
+# 未習の前提知識がこの数を超えたら Day0 で消化しきれないとみなし、後送りする（修正4 b-2）
+_MAX_PREREQ_FOR_DAY0 = 4
+# 後送りの試行上限。1回につき PDF 付きの生成呼び出しが1回増えるため2回まで。
+# 使い切ってもなお前提過多なら、最後の候補を配信して Day0 を分割して消化する。
+_MAX_DEFERRALS = 2
+# 台帳が空のうちは既知の概念も未習と判定されるため、既習がこの数に達するまで後送りしない
+_LEDGER_WARMUP = 10
+# Day0 の1日あたりの概念数（1概念2〜3文 × 15分の制約から）
+_DAY0_PER_DAY = 3
+
+
+def _difficulty_type(pm: dict) -> str:
+    text = f"{pm.get('venue', '')} {pm.get('title', '')}".lower()
+    th = any(k in text for k in _THEORY_KW)
+    pr = any(k in text for k in _PRACTICAL_KW)
+    if th and not pr:
+        return "理論型"
+    if pr and not th:
+        return "実務型"
+    return "混合/不明"
+
+
+def _queue_entry(fetched: dict) -> dict:
+    """後送り用のキュー項目。ロードマップ上の位置づけも保持する。"""
+    pm = fetched["paper_meta"]
+    return {
+        "title": pm.get("title", ""),
+        "s2_paper_id": pm.get("s2_paper_id", ""),
+        "pdf_url": pm.get("pdf_url", ""),
+        "url": pm.get("url"),
+        "authors": pm.get("authors", []),
+        "year": pm.get("year"),
+        "venue": pm.get("venue", ""),
+        "roadmap_position": fetched.get("roadmap_position", ""),
+        "assigned_sections": fetched.get("assigned_hint", "全体"),
+        "phase": fetched.get("phase"),
+    }
+
+
+def _easier_request(unlearned: list[str]) -> str:
+    """後送り時に検索・選定へ渡す要望（未習概念を扱う入門的論文を優先させる）。"""
+    names = "、".join(unlearned[:5])
+    return (
+        f"直前の候補は未習の前提概念（{names}）が多く、後送りしました。"
+        "次は、それらの概念そのものを扱う入門的・チュートリアル的な論文やレビュー論文を優先してください。"
+        "新規性より基礎の説明が丁寧なものを選んでください。"
+    )
+
+
+def _activate_next(user_requests: list[str], today: str) -> dict:
+    """次の論文を取得・生成する。
+
+    未習の前提が多すぎる論文は後送りし（キュー末尾に戻す）、その未習概念を扱う
+    易しい論文を探しに行く（修正5）。後送りは _MAX_DEFERRALS 回まで。使い切っても
+    前提過多なら、最後に取得した論文をそのまま配信し Day0 を分割して消化する。
+    """
+    requests = list(user_requests)
+    deferred: list[dict] = []  # 後送り分。取り直しを防ぐため最後にまとめて戻す
+    fetched = gen = None
+    unlearned: list[str] = []
+    try:
+        for attempt in range(_MAX_DEFERRALS + 1):
+            fetched = _fetch_next_paper(requests, today)
+            pm = fetched["paper_meta"]
+            gen = claude.generate_delivery_and_quiz(
+                fetched["pdf_bytes"], fetched["pdf_text"], pm,
+                fetched["roadmap_position"], fetched["assigned_hint"],
+            )
+            unlearned = store.record_prerequisites(pm["s2_paper_id"], gen.get("prerequisites") or [])
+            warmed_up = store.concept_stats()["既習"] >= _LEDGER_WARMUP
+            if (
+                attempt < _MAX_DEFERRALS
+                and warmed_up
+                and len(unlearned) > _MAX_PREREQ_FOR_DAY0
+            ):
+                # 前提過多 → 後送りし、未習概念を扱う易しい論文を探す（捨てない・通知しない）
+                print(f"[morning] 前提過多のため後送り: {pm.get('title', '')[:60]} "
+                      f"(未習 {len(unlearned)}件)")
+                deferred.append(_queue_entry(fetched))
+                requests = list(user_requests) + [_easier_request(unlearned)]
+                continue
+            break
+    finally:
+        for item in deferred:
+            store.queue_push_back(item)
+    return _build_active(fetched, gen, unlearned, today)
+
+
+def _build_active(fetched: dict, gen: dict, unlearned: list[str], today: str) -> dict:
+    """論文を配信し、未習前提があれば Day0 から、無ければ Day1 から開始する。"""
     pm = fetched["paper_meta"]
     store.add_delivered(pm["s2_paper_id"], pm["title"])
 
-    gen = claude.generate_delivery_and_quiz(
-        fetched["pdf_bytes"], fetched["pdf_text"], pm,
-        fetched["roadmap_position"], fetched["assigned_hint"],
-    )
     assigned = gen.get("assigned_sections") or fetched["assigned_hint"]
     reading_plan = gen.get("reading_plan") or []
     if len(reading_plan) < 3:
@@ -199,6 +288,7 @@ def _activate_paper(fetched: dict, today: str) -> dict:
         prereq_block = "**前提知識（詰まらない最小限の直観）**\n" + "\n".join(items) + "\n\n"
     skip = (gen.get("skip_sections") or "").strip()
     skip_block = f"**初読で飛ばしてよい箇所**\n{skip}\n\n" if skip else ""
+    dtype = _difficulty_type(pm)
 
     description = (
         f"**要約**\n{gen.get('summary', '')}\n\n"
@@ -217,6 +307,7 @@ def _activate_paper(fetched: dict, today: str) -> dict:
             {"name": "年 / 出典",
              "value": f"{pm.get('year') or '?'} / {pm.get('venue') or '不明'}"[:1000],
              "inline": True},
+            {"name": "難易度型", "value": dtype, "inline": True},
         ],
         "footer": {"text": "📄 3日かけて読みます。Day1から順に読み進めてください"},
     }
@@ -224,14 +315,9 @@ def _activate_paper(fetched: dict, today: str) -> dict:
 
     active = {
         "paper": {
-            "title": pm["title"],
-            "s2_paper_id": pm["s2_paper_id"],
-            "url": pm.get("url"),
-            "pdf_url": pm["pdf_url"],
-            "phase": fetched.get("phase"),
-            "authors": authors_list,
-            "year": pm.get("year"),
-            "venue": pm.get("venue"),
+            "title": pm["title"], "s2_paper_id": pm["s2_paper_id"], "url": pm.get("url"),
+            "pdf_url": pm["pdf_url"], "phase": fetched.get("phase"),
+            "authors": authors_list, "year": pm.get("year"), "venue": pm.get("venue"),
         },
         "summary": gen.get("summary"),
         "reading_plan": reading_plan,
@@ -248,9 +334,61 @@ def _activate_paper(fetched: dict, today: str) -> dict:
         "posted_date": today,
         "quiz_message_id": None,
         "graded_date": None,
+        "reduced": False,
     }
-    active["quiz_message_id"] = _post_question(active, 1)
+
+    if unlearned:
+        # 未習の前提概念がある → Day0（前提知識の確認）から開始（修正4b）
+        active["stage"] = "day0"
+        active["day0_concepts"] = unlearned
+        active["day0_index"] = 0
+        active["quiz_message_id"] = _post_day0(active)
+    else:
+        active["stage"] = "paper"
+        active["quiz_message_id"] = _post_question(active, 1)
     return active
+
+
+def _day0_chunk(active: dict) -> list[str]:
+    """今日提示する Day0 の概念（1日 _DAY0_PER_DAY 個まで）。"""
+    names = active.get("day0_concepts", []) or []
+    start = active.get("day0_index", 0)
+    return names[start : start + _DAY0_PER_DAY]
+
+
+def _post_day0(active: dict) -> str | None:
+    """Day0: その日の分の前提概念の直観だけを提示し、掴めたら [読了] を求める。
+
+    概念が _DAY0_PER_DAY を超える場合は Day0-1, Day0-2 … と複数日に分割する（仕様107行）。
+    """
+    names = active.get("day0_concepts", []) or []
+    chunk = _day0_chunk(active)
+    total_days = max(1, -(-len(names) // _DAY0_PER_DAY))  # 切り上げ
+    day_no = active.get("day0_index", 0) // _DAY0_PER_DAY + 1
+    label = f"Day0-{day_no}/{total_days}" if total_days > 1 else "Day0"
+    intuitions = store.concept_intuitions(chunk)
+    title = (active.get("paper") or {}).get("title", "本日の論文")
+    lines = [f"🧩 **{label}: 前提知識の確認**", "",
+             "次の論文を読む前に、以下の前提概念の『詰まらない最小限の直観』を掴んでください"
+             f"（厳密な理解は不要）。\n対象論文: {title}", ""]
+    for it in intuitions:
+        lines.append(f"・**{it['concept']}**: {it['intuition']}")
+    remaining = len(names) - active.get("day0_index", 0) - len(chunk)
+    if remaining > 0:
+        lines += ["", f"（この論文の前提はあと{remaining}個あります。明日以降に分けて確認します）"]
+    next_step = "明日は残りの前提を確認します。" if remaining > 0 else "明日から論文本体に入ります。"
+    lines += [
+        "",
+        "――――――――――――――",
+        f"直観が掴めたら `[読了]` と返信してください（{next_step}）。",
+        "まだ曖昧なら `[途中]` と、どこが分からないかを書いてください（重点解説します）。",
+        "期限: 明朝7:00まで",
+    ]
+    return discord.post_embed({
+        "title": f"{label} 前提知識 — {title[:180]}",
+        "description": "\n".join(lines)[:4000],
+        "color": 0x59A14F,
+    })
 
 
 def _post_question(active: dict, day: int, extra: str | None = None, reduced: bool = False) -> str | None:
@@ -298,6 +436,23 @@ def _maybe_hint(active: dict, day_index: int, answer_text: str) -> str | None:
         return None
 
 
+def _post_progress() -> None:
+    """概念台帳と読了率の進捗を提示する（修正6）。両曲線が寝れば到達間近。"""
+    stats = store.concept_stats()
+    log = store.load_log()
+    # 採点側の表記ゆれ（例: 「読了（回答から推定、タグマーカーなし）」）を取りこぼさない
+    statuses = [str(r.get("self_reported_status") or "") for r in log]
+    finished = sum(1 for s in statuses if s.startswith("読了"))
+    partial = sum(1 for s in statuses if s.startswith("途中"))
+    total = finished + partial
+    ratio = f"{finished}/{total}" if total else "—"
+    discord.post_text(
+        f"📈 **進捗** 前提概念: 既習{stats['既習']} / 詰まり{stats['詰まった']} / "
+        f"未習{stats['未習']}（計{stats['total']}）"
+        f" ｜ 読了率: {ratio}（読了{finished}・途中{partial}）"
+    )
+
+
 def _post_single_grade(result: dict, day: int) -> None:
     verdict = {"correct": "✅ 正解", "partial": "△ 部分的に正解", "incorrect": "❌ 不正解"}.get(
         result.get("verdict"), result.get("verdict")
@@ -339,6 +494,47 @@ def run_morning() -> None:
         store.git_commit_and_push(f"skip {today}")
         return
 
+    # --- Day0（前提知識の確認日）: クイズ採点ではなく [読了] で本体へ進む ---
+    if active and active.get("stage") == "day0":
+        if active.get("posted_date") == today:
+            store.set_last_morning_date(today)
+            store.git_commit_and_push(f"morning {today}: finalize day0")
+            return
+        chunk = _day0_chunk(active)
+        if answered and status not in ("途中", "未読"):
+            # その日の分を既習化し、残りがあれば次の Day0 へ、無ければ論文本体へ
+            store.mark_concepts(chunk, "既習")
+            beeminder.submit_datapoint(f"day0 {active.get('posted_date')}", value=1)
+            active["day0_index"] = active.get("day0_index", 0) + len(chunk)
+            if active["day0_index"] < len(active.get("day0_concepts", [])):
+                discord.post_text("✅ 前提知識の確認、今日の分は完了です。続きを確認します。")
+                active["quiz_message_id"] = _post_day0(active)
+            else:
+                discord.post_text("✅ 前提知識の確認、完了です。今日から論文本体に入ります。")
+                active["stage"] = "paper"
+                active["cycle_day"] = 1
+                active["quiz_message_id"] = _post_question(active, 1)
+            active["posted_date"] = today
+        else:
+            if not answered:
+                discord.post_text(
+                    "⚠️ Day0（前提知識）の確認が未回答でした。未回答のためペナルティが発生します。"
+                )
+                store.append_log({
+                    "date": active.get("posted_date"), "paper": active.get("paper", {}),
+                    "day": 0, "answered": False, "penalty": True,
+                })
+            else:
+                # [途中]/[未読] → 掴めていない概念として台帳に残し、同じ分を再掲する
+                store.mark_concepts(chunk, "詰まった")
+                beeminder.submit_datapoint(f"day0 {active.get('posted_date')}", value=1)
+            active["quiz_message_id"] = _post_day0(active)
+            active["posted_date"] = today
+        store.set_active(active)
+        store.set_last_morning_date(today)
+        store.git_commit_and_push(f"morning {today}: day0")
+        return
+
     # --- Phase 1: 前日に出した1問を採点（未採点かつ本日出題分でない場合）---
     if (
         active
@@ -353,10 +549,17 @@ def run_morning() -> None:
             result = claude.grade_single(active, day - 1, user_answers_raw, store.recent_log(14))
             _post_single_grade(result, day)
             beeminder.submit_datapoint(f"answered {pdate} Q{day}", value=1)
+            # 詰まりの逆方向センサー（修正6）: 既習に上げずに台帳へ残す
+            blocking = [
+                str(c).strip() for c in (result.get("blocking_concepts") or []) if str(c).strip()
+            ]
+            if blocking:
+                store.mark_concepts(blocking, "詰まった")
             store.append_log({
                 "date": pdate, "paper": paper, "day": day, "answered": True,
                 "self_reported_status": result.get("reported_status"),
                 "verdict": result.get("verdict"), "cause": result.get("cause"),
+                "blocking_concepts": blocking,
                 "penalty": False,
             })
         else:
@@ -381,8 +584,8 @@ def run_morning() -> None:
         return
 
     if active is None:
-        # 初回 → 次の論文をアクティブ化（Day1）
-        store.set_active(_activate_paper(_fetch_next_paper(user_requests, today), today))
+        # 初回 → 次の論文をアクティブ化
+        store.set_active(_activate_next(user_requests, today))
     else:
         day = active.get("cycle_day", 1)
         if not answered:
@@ -411,8 +614,17 @@ def run_morning() -> None:
             active["posted_date"] = today
             store.set_active(active)
         else:
-            # 3日サイクル完了 → 次の論文をアクティブ化（Day1）
-            store.set_active(_activate_paper(_fetch_next_paper(user_requests, today), today))
+            # 3日サイクル完了 → 完走した論文の前提を既習化し、進捗を提示して次へ。
+            # ただし採点で詰まりが記録された概念は既習に上げない（修正6のセンサー）。
+            ledger = store.get_concepts()
+            done_names = [
+                p.get("concept") for p in active.get("prerequisites", [])
+                if isinstance(p, dict) and p.get("concept")
+                and ledger.get(p["concept"], {}).get("status") != "詰まった"
+            ]
+            store.mark_concepts(done_names, "既習")
+            _post_progress()
+            store.set_active(_activate_next(user_requests, today))
 
     store.set_last_morning_date(today)
     store.git_commit_and_push(f"morning {today}: advance")

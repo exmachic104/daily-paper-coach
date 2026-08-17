@@ -192,6 +192,84 @@ def queue_pop() -> dict | None:
     return item
 
 
+def queue_push_back(item: dict) -> None:
+    """キュー末尾に戻す（前提過多の論文の後送り用。捨てない）。"""
+    state = _read_json(STATE_PATH, {})
+    q = state.get("queue", [])
+    q.append(item)
+    state["queue"] = q
+    _write_json(STATE_PATH, state)
+
+
+# ---- 概念台帳（既習/未習の蓄積） ------------------------------------------
+
+def get_concepts() -> dict:
+    return _read_json(STATE_PATH, {}).get("concepts", {})
+
+
+def _save_concepts(concepts: dict) -> None:
+    state = _read_json(STATE_PATH, {})
+    state["concepts"] = concepts
+    _write_json(STATE_PATH, state)
+
+
+def record_prerequisites(paper_id: str, prerequisites: list) -> list[str]:
+    """論文の前提概念を台帳に登録し、まだ既習でない概念名の一覧を返す。"""
+    concepts = get_concepts()
+    unlearned: list[str] = []
+    for p in prerequisites or []:
+        name = (p.get("concept") if isinstance(p, dict) else str(p)) or ""
+        name = name.strip()
+        if not name:
+            continue
+        entry = concepts.get(name)
+        if entry is None:
+            entry = {
+                "status": "未習",
+                "papers": [],
+                "intuition": p.get("intuition", "") if isinstance(p, dict) else "",
+            }
+            concepts[name] = entry
+        if paper_id and paper_id not in entry["papers"]:
+            entry["papers"].append(paper_id)
+        if isinstance(p, dict) and p.get("intuition") and not entry.get("intuition"):
+            entry["intuition"] = p["intuition"]
+        if entry["status"] != "既習":
+            unlearned.append(name)
+    _save_concepts(concepts)
+    return unlearned
+
+
+def mark_concepts(names: list[str], status: str) -> None:
+    concepts = get_concepts()
+    for n in names:
+        if n in concepts:
+            concepts[n]["status"] = status
+    _save_concepts(concepts)
+
+
+def concept_intuitions(names: list[str]) -> list[dict]:
+    """指定概念の直観（台帳に記録済みのもの）を返す。"""
+    concepts = get_concepts()
+    return [
+        {"concept": n, "intuition": concepts.get(n, {}).get("intuition", "")}
+        for n in names
+    ]
+
+
+def concept_stats() -> dict:
+    """台帳の状態別の件数。status は 未習 / 詰まった / 既習 の3値。"""
+    concepts = get_concepts()
+    learned = sum(1 for v in concepts.values() if v.get("status") == "既習")
+    stuck = sum(1 for v in concepts.values() if v.get("status") == "詰まった")
+    return {
+        "total": len(concepts),
+        "既習": learned,
+        "詰まった": stuck,
+        "未習": len(concepts) - learned - stuck,
+    }
+
+
 # ---- git --------------------------------------------------------------
 
 def git_commit_and_push(message: str) -> None:
