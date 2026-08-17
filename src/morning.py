@@ -41,11 +41,16 @@ def _today() -> str:
     return datetime.datetime.now(jst).strftime("%Y-%m-%d")
 
 
+def _add_days(date_str: str, days: int) -> str:
+    d = datetime.date.fromisoformat(date_str) + datetime.timedelta(days=days)
+    return d.isoformat()
+
+
 def _collect_user_input(after_id: str | None) -> tuple[str, dict]:
     """前回の出題以降のユーザー投稿を収集し、回答本文とコマンドを返す。"""
     msgs = discord.fetch_messages_after(after_id, limit=100)
     answers: list[str] = []
-    commands = {"skip": False, "request": None, "feedback": None}
+    commands = {"skip": False, "pause": None, "resume": False, "request": None, "feedback": None}
     for m in msgs:
         if not discord.is_user_message(m):
             continue
@@ -55,6 +60,13 @@ def _collect_user_input(after_id: str | None) -> tuple[str, dict]:
         low = content.lower()
         if low.startswith("!skip"):
             commands["skip"] = True
+        elif low.startswith("!pause"):
+            # 「!pause 7」で7日後に自動再開。日数省略時は !resume まで無期限。
+            rest = content[len("!pause"):].strip()
+            days = int(rest.split()[0]) if rest.split() and rest.split()[0].isdigit() else None
+            commands["pause"] = {"days": days}
+        elif low.startswith("!resume"):
+            commands["resume"] = True
         elif low.startswith("!request"):
             commands["request"] = content[len("!request"):].strip()
         elif low.startswith("!feedback"):
@@ -453,10 +465,45 @@ def _post_progress() -> None:
     )
 
 
+_VERDICT_LABEL = {"correct": "✅ 正解", "partial": "△ 部分的に正解", "incorrect": "❌ 不正解"}
+
+
+def _post_resume_history(active: dict) -> None:
+    """再開時に、その論文でここまでに答えた日の回答と講評を振り返る。
+
+    Day2 で休止したなら Day1 の、Day3 なら Day1・Day2 の履歴を提示する。
+    """
+    day = active.get("cycle_day", 1)
+    past = [h for h in (active.get("history") or []) if h.get("day", 0) < day]
+    if not past:
+        return
+    lines = ["休止前に答えた分の回答と講評です。ここまでの流れを思い出してから今日の問いに進んでください。", ""]
+    for h in past:
+        lines.append(
+            f"**Day{h.get('day')}・{_DAY_LABEL.get(h.get('day'), '')}"
+            f"（{h.get('date', '')}）** {_VERDICT_LABEL.get(h.get('verdict'), h.get('verdict') or '')}"
+        )
+        if h.get("question"):
+            lines.append(f"　Q. {h['question']}")
+        if h.get("answer"):
+            lines.append(f"　あなたの回答: {h['answer']}")
+        if h.get("note"):
+            lines.append(f"　講評: {h['note']}")
+        if h.get("cause"):
+            lines.append(f"　原因: {h['cause']}")
+        if h.get("advice"):
+            lines.append(f"　💡 {h['advice']}")
+        lines.append("")
+    title = (active.get("paper") or {}).get("title", "")
+    discord.post_embed({
+        "title": f"📜 これまでの経過 — {title[:180]}",
+        "description": "\n".join(lines)[:4000],
+        "color": 0x4E79A7,
+    })
+
+
 def _post_single_grade(result: dict, day: int) -> None:
-    verdict = {"correct": "✅ 正解", "partial": "△ 部分的に正解", "incorrect": "❌ 不正解"}.get(
-        result.get("verdict"), result.get("verdict")
-    )
+    verdict = _VERDICT_LABEL.get(result.get("verdict"), result.get("verdict"))
     lines = [f"📝 **採点結果（Day{day}・{_DAY_LABEL.get(day, '')}）**", "", f"**Q{day}** {verdict}"]
     if result.get("note"):
         lines.append(f"　{result['note']}")
@@ -493,6 +540,49 @@ def run_morning() -> None:
         store.set_last_morning_date(today)
         store.git_commit_and_push(f"skip {today}")
         return
+
+    # --- !pause: 長期休止に入る（!resume まで、または指定日数まで）---
+    if commands.get("pause") is not None:
+        days = commands["pause"].get("days")
+        until = _add_days(today, days) if days else None
+        store.set_pause({"since": today, "until": until})
+        limit = f"{until} に自動再開します" if until else "`!resume` と投稿するまで再開しません"
+        discord.post_text(
+            f"⏸️ 休止しました（{limit}）。休止中は配信・採点・ペナルティをすべて停止します。"
+            "再開時は、止めた時点の問いから続きます。"
+        )
+        store.set_last_morning_date(today)
+        store.git_commit_and_push(f"pause {today}")
+        return
+
+    # --- 休止中: 何もしない。!resume または期限到来で再開する ---
+    pause = store.get_pause()
+    if pause:
+        until = pause.get("until")
+        auto = bool(until and until <= today)
+        if not (commands.get("resume") or auto):
+            print(f"[morning] 休止中（{pause.get('since')}〜）のため配信・採点をスキップします。")
+            return
+        store.set_pause(None)
+        reason = "期限に到達したため自動再開します" if auto and not commands.get("resume") else "休止を解除しました"
+        discord.post_text(f"▶️ {reason}。今日から再開します。")
+        if active:
+            _post_resume_history(active)
+            # 休止前に出したまま未採点の問いは、ペナルティ無しで確定させる
+            if active.get("posted_date"):
+                active["graded_date"] = active["posted_date"]
+            if active.get("stage") == "day0":
+                active["quiz_message_id"] = _post_day0(active)
+            else:
+                active["quiz_message_id"] = _post_question(
+                    active, active.get("cycle_day", 1), reduced=active.get("reduced", False)
+                )
+            active["posted_date"] = today
+            store.set_active(active)
+            store.set_last_morning_date(today)
+            store.git_commit_and_push(f"morning {today}: resume")
+            return
+        # 学習中の論文が無ければ、そのまま通常フロー（新しい論文の配信）へ
 
     # --- Day0（前提知識の確認日）: クイズ採点ではなく [読了] で本体へ進む ---
     if active and active.get("stage") == "day0":
@@ -555,6 +645,18 @@ def run_morning() -> None:
             ]
             if blocking:
                 store.mark_concepts(blocking, "詰まった")
+            # 再開時の振り返り用に、その日の回答と講評を論文単位で残す
+            questions = active.get("questions") or []
+            active.setdefault("history", []).append({
+                "day": day,
+                "date": pdate,
+                "question": _strip_label(questions[day - 1]) if day - 1 < len(questions) else "",
+                "answer": user_answers_raw.strip()[:400],
+                "verdict": result.get("verdict"),
+                "note": result.get("note"),
+                "cause": result.get("cause"),
+                "advice": result.get("advice"),
+            })
             store.append_log({
                 "date": pdate, "paper": paper, "day": day, "answered": True,
                 "self_reported_status": result.get("reported_status"),

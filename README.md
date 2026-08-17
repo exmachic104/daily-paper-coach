@@ -73,6 +73,10 @@ Settings → Actions → General → Workflow permissions を **Read and write p
 ## Discord コマンド（次のジョブで反映）
 
 - `!skip` : 今日は休み。ペナルティ対象外、同じ論文を翌日に持ち越す
+- `!pause` : 長期休止。配信・採点・ペナルティをすべて停止する（`!resume` まで無期限）
+- `!pause <日数>` : 日数を指定して休止（例: `!pause 7` → 7日後の朝に自動再開）
+- `!resume` : 休止を解除。止めた時点の問い（Day2 で止めたなら Day2）から再開し、
+  それまでの日の回答と講評を振り返りとして提示する
 - `!request <テーマ>` : 次の論文のテーマ希望
 - `!feedback <内容>` : 難易度・分量などへの要望
 

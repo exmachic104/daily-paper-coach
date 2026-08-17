@@ -158,6 +158,20 @@ def set_last_morning_date(date: str) -> None:
 
 # ---- 学習中の論文（active）と待ち行列（queue） --------------------------
 
+def get_pause() -> dict | None:
+    """休止情報 {"since": 開始日, "until": 自動再開日 or None}。休止していなければ None。"""
+    return _read_json(STATE_PATH, {}).get("pause")
+
+
+def set_pause(info: dict | None) -> None:
+    state = _read_json(STATE_PATH, {})
+    if info is None:
+        state.pop("pause", None)
+    else:
+        state["pause"] = info
+    _write_json(STATE_PATH, state)
+
+
 def get_active() -> dict | None:
     """現在3日サイクルで学習中の論文の状態。無ければ None。"""
     return _read_json(STATE_PATH, {}).get("active")
