@@ -1,5 +1,5 @@
 {
-  "last_morning_date": "2026-08-18",
+  "last_morning_date": "2026-08-19",
   "delivered": [
     {
       "id": "W2798112335",
@@ -64,5 +64,9 @@
     "posted_date": "2026-08-18",
     "quiz_message_id": "1539037659345850419",
     "graded_date": "2026-08-17"
+  },
+  "pause": {
+    "since": "2026-08-19",
+    "until": null
   }
 }
