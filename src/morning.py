@@ -541,21 +541,9 @@ def run_morning() -> None:
         store.git_commit_and_push(f"skip {today}")
         return
 
-    # --- !pause: 長期休止に入る（!resume まで、または指定日数まで）---
-    if commands.get("pause") is not None:
-        days = commands["pause"].get("days")
-        until = _add_days(today, days) if days else None
-        store.set_pause({"since": today, "until": until})
-        limit = f"{until} に自動再開します" if until else "`!resume` と投稿するまで再開しません"
-        discord.post_text(
-            f"⏸️ 休止しました（{limit}）。休止中は配信・採点・ペナルティをすべて停止します。"
-            "再開時は、止めた時点の問いから続きます。"
-        )
-        store.set_last_morning_date(today)
-        store.git_commit_and_push(f"pause {today}")
-        return
-
     # --- 休止中: 何もしない。!resume または期限到来で再開する ---
+    # 休止の投稿は次の出題まで取得範囲に残り続けるため、毎朝読み直しても再通知しない。
+    just_resumed = False
     pause = store.get_pause()
     if pause:
         until = pause.get("until")
@@ -564,6 +552,7 @@ def run_morning() -> None:
             print(f"[morning] 休止中（{pause.get('since')}〜）のため配信・採点をスキップします。")
             return
         store.set_pause(None)
+        just_resumed = True
         reason = "期限に到達したため自動再開します" if auto and not commands.get("resume") else "休止を解除しました"
         discord.post_text(f"▶️ {reason}。今日から再開します。")
         if active:
@@ -583,6 +572,20 @@ def run_morning() -> None:
             store.git_commit_and_push(f"morning {today}: resume")
             return
         # 学習中の論文が無ければ、そのまま通常フロー（新しい論文の配信）へ
+
+    # --- !pause: 長期休止に入る（!resume まで、または指定日数まで）---
+    if commands.get("pause") is not None and not just_resumed:
+        days = commands["pause"].get("days")
+        until = _add_days(today, days) if days else None
+        store.set_pause({"since": today, "until": until})
+        limit = f"{until} に自動再開します" if until else "`!resume` と投稿するまで再開しません"
+        discord.post_text(
+            f"⏸️ 休止しました（{limit}）。休止中は配信・採点・ペナルティをすべて停止します。"
+            "再開時は、止めた時点の問いから続きます。"
+        )
+        store.set_last_morning_date(today)
+        store.git_commit_and_push(f"pause {today}")
+        return
 
     # --- Day0（前提知識の確認日）: クイズ採点ではなく [読了] で本体へ進む ---
     if active and active.get("stage") == "day0":
